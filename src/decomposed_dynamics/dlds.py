@@ -3,7 +3,7 @@ import functools
 import jax.numpy as jnp
 from jax import Array, grad, jit, lax
 from jaxopt import ProximalGradient
-from jaxopt.prox import prox_lasso
+from jaxopt.prox import prox_non_negative_lasso
 
 from .loss_functions import (
     _bpdn_least_squares,
@@ -23,7 +23,7 @@ def update_c(
     tol: float = 1e-4,
 ) -> Array:
     solver = ProximalGradient(
-        _bpdn_least_squares, prox_lasso, maxiter=max_iter, tol=tol
+        _bpdn_least_squares, prox_non_negative_lasso, maxiter=max_iter, tol=tol
     )
     update_c_t = functools.partial(
         _update_c_t,
