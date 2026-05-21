@@ -1,9 +1,15 @@
 import functools
 
 import jax.numpy as jnp
-from jax import Array, jit, lax, vmap
+from jax import Array, grad, jit, lax
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_lasso
+
+from .loss_functions import (
+    _bpdn_least_squares,
+    _dynamics_recon_loss_all,
+    _operator_decorr_loss,
+)
 
 
 @jit
@@ -38,7 +44,7 @@ def _update_c_t(
     solver: ProximalGradient,
     l1_coeff: float,
     smooth_coeff: float | Array,
-    epsilon: float = 200.0,
+    reweight_coeff: float = 200.0,
 ) -> tuple[tuple[Array, Array], Array]:
 
     c_tminus1, is_first = carry
@@ -59,7 +65,7 @@ def _update_c_t(
     # solve reweighted L1 using previous as warm start
     c_t, _ = solver.run(
         c_t,
-        hyperparams_prox=l1_coeff / (1 + epsilon * jnp.abs(c_t)),
+        hyperparams_prox=l1_coeff / (1 + reweight_coeff * jnp.abs(c_t)),
         FX_t=FX_t,
         X_tplus1=X_tplus1,
         c_tminus1=c_tminus1,
@@ -70,15 +76,7 @@ def _update_c_t(
     return (c_t, jnp.bool_(False)), c_t
 
 
-def _bpdn_least_squares(
-    c_t: Array, FX_t: Array, X_tplus1: Array, c_tminus1: Array, smooth_coeff: Array
-) -> Array:
-    reconstruction_loss = 0.5 * ((c_t @ FX_t - X_tplus1) ** 2).sum()
-    smooth_loss = 0.5 * smooth_coeff * ((c_t - c_tminus1) ** 2).sum()
-
-    return reconstruction_loss + smooth_loss
-
-
+@jit(static_argnames=["normalize_F"])
 def update_F(
     C: Array,
     X: Array,
@@ -87,8 +85,15 @@ def update_F(
     decorr_coeff: float,
     normalize_F: bool = True,
 ):
-    pass
+    dynamics_recon_gradient = grad(_dynamics_recon_loss_all, argnums=2)(C, X, F)
+    F = F - lr_f * dynamics_recon_gradient
 
+    decorr_gradient = grad(_operator_decorr_loss)(F)
+    F = F - decorr_coeff * decorr_gradient
 
-def step_dynamics(x_t: Array, c_t: Array, F: Array):
-    pass
+    if normalize_F:
+        F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
+
+    # TODO: Add soft-thresholding for L1 regularization
+
+    return F
