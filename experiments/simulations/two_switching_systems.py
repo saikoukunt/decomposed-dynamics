@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jax.typing import Array
+from jax import Array
 
 from .utils import create_random_dynamics, generate_switching_c
 
@@ -51,17 +51,25 @@ def _simulate_no_obs_state(
     total_motifs = sum(num_motifs)
 
     X = np.zeros((num_trials, total_latents, num_timepoints))
-    C = np.zeros((num_trials, total_motifs, num_timepoints))
+    C = np.zeros((num_trials, total_motifs, num_timepoints - 1))
 
     for trial in range(num_trials):
         C[trial][: num_motifs[0]] = generate_switching_c(
-            num_motifs[0], num_timepoints, min_switch_time, max_extra_switch_time
+            num_motifs[0],
+            num_timepoints,
+            min_switch_time,
+            max_extra_switch_time,
+            seed=trial,
         )
         C[trial][num_motifs[0] :] = generate_switching_c(
-            num_motifs[1], num_timepoints, min_switch_time, max_extra_switch_time
+            num_motifs[1],
+            num_timepoints,
+            min_switch_time,
+            max_extra_switch_time,
+            seed=trial + num_trials,
         )
         X[trial] = _simulate_latent_trajectory(
-            C[trial], F, num_motifs, num_latents, num_timepoints
+            C[trial], F, num_latents, num_motifs, num_timepoints
         )
 
     return X, C
@@ -78,14 +86,14 @@ def _simulate_latent_trajectory(
     total_latents = sum(num_latents)
 
     F_t = np.zeros((total_latents, total_latents))
-    X = np.zeros((num_latents, num_timepoints))
+    X = np.zeros((total_latents, num_timepoints))
 
     X[:, 0] = rng.standard_normal((total_latents))
     X[: num_latents[0], 0] /= np.linalg.norm(X[: num_latents[0], 0])
     X[num_latents[0] :, 0] /= np.linalg.norm(X[num_latents[0] :, 0])
 
-    for t in range(1, num_timepoints + 1):
-        F_t = C[:, t] @ F
+    for t in range(1, num_timepoints):
+        F_t = np.einsum("k, kij -> ij", C[:, t - 1], F)
 
         if (X[: num_latents[0], t - 1] == 0).all() and (
             C[: num_motifs[0], t - 1] != 0
@@ -99,6 +107,6 @@ def _simulate_latent_trajectory(
             X[num_latents[0] :, t - 1] = rng.standard_normal((num_latents[0]))
             X[num_latents[0] :, t - 1] /= np.linalg.norm(X[num_latents[0] :, t - 1])
 
-        X[:, t] = F_t @ X[:, t - 1]
+        X[:, t] = np.einsum("ij, j -> i", F_t, X[:, t - 1])
 
     return X
