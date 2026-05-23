@@ -5,13 +5,13 @@ from jax import Array
 
 
 def extract_snippets(
-    trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int
+    trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     num_trials = len(trial_data)
     num_observations = trial_data[0].shape[0]
     trial_length = trial_data[0].shape[1]
 
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
 
     snippet_length = min(samples_per_snippet, trial_length)
     snippets = np.zeros((num_snippets, num_observations, snippet_length))

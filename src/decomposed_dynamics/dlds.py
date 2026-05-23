@@ -1,10 +1,13 @@
 import functools
 
+import jax
 import jax.numpy as jnp
-from jax import Array, grad, jit, lax
+from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
+from tqdm import tqdm, trange
 
+from .extract_snippets import extract_snippets
 from .loss_functions import (
     _bpdn_least_squares,
     _dynamics_recon_loss_all,
@@ -12,9 +15,97 @@ from .loss_functions import (
 )
 
 
+def fit_no_obs(
+    data: Array,
+    num_motifs: int,
+    samples_per_snippet: int,
+    num_snippets: int,
+    max_iter: int = 200,
+    c_l1_coeff: float = 0.4,
+    c_smooth_coeff: float = 0.4,
+    c_fista_tol: float = 1e-4,
+    c_fista_max_iter: int = 1000,
+    F_lr_init: float = 10.0,
+    F_decorr_coeff: float = 0.05,
+    F_lr_decay: float = 0.99995,
+):
+    num_latents = data.shape[1]
+    num_timepoints = min(data.shape[2], samples_per_snippet)
+
+    key = jax.random.key(42)
+    F = jax.random.normal(key, (num_motifs, num_latents, num_latents))
+    F /= jnp.linalg.norm(F, axis=(1, 2), keepdims=True)
+
+    F_lr = F_lr_init
+    pbar = trange(max_iter)
+    for i in pbar:
+        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+
+        C = infer_no_obs_state(
+            X,
+            F,
+            c_smooth_coeff=c_smooth_coeff,
+            c_l1_coeff=c_l1_coeff,
+            c_fista_max_iter=c_fista_max_iter,
+            c_fista_tol=c_fista_tol,
+        )
+        F_new = update_F(C, X, F, lr_F=F_lr, decorr_coeff=F_decorr_coeff)
+
+        reconstruction_error = float(_dynamics_recon_loss_all(C, X, F_new))
+        delta_F = float(calculate_delta_F(F_new, F))
+        pbar.set_postfix(
+            recon_err=f"{reconstruction_error:.4f}", delta_F=f"{delta_F:.6f}"
+        )
+
+        F = F_new
+        F_lr *= F_lr_decay
+
+    return F
+
+
+def infer_no_obs_state(
+    X: Array,
+    F: Array,
+    c_l1_coeff: float = 0.2,
+    c_smooth_coeff: float = 0.4,
+    c_fista_tol: float = 1e-4,
+    c_fista_max_iter: int = 1000,
+):
+
+    C = update_c_all(
+        X,
+        F,
+        l1_coeff=c_l1_coeff,
+        smooth_coeff=c_smooth_coeff,
+        max_iter=c_fista_max_iter,
+        tol=c_fista_tol,
+    )
+
+    return C
+
+
+@jit
+def calculate_delta_F(F_new, F_old):
+    return vmap(_calculate_one_delta_F)(F_new, F_old).mean()
+
+
+@jit
+def _calculate_one_delta_F(F_new, F_old):
+    delta_F = F_new - F_old
+    delta_F = jnp.einsum("ij, ij", delta_F, delta_F)
+    delta_F /= (F_old**2).sum()
+
+    return delta_F
+
+
+@jit
+def update_c_all(X: Array, F: Array, **kwargs):
+    update_one_trial = functools.partial(update_c, F=F, **kwargs)
+    return vmap(update_one_trial)(X)
+
+
 @jit
 def update_c(
-    C: Array,
     X: Array,
     F: Array,
     smooth_coeff: float = 0,
@@ -32,9 +123,13 @@ def update_c(
         l1_coeff=l1_coeff,
         smooth_coeff=smooth_coeff,
     )
-    _, C = lax.scan(update_c_t, (C[:, 0], jnp.bool_(True)), (X[:, :-1].T, X[:, 1:].T))
+    _, C = lax.scan(
+        update_c_t,
+        (jnp.zeros((F.shape[0])), jnp.bool_(True)),
+        (X[:, :-1].T, X[:, 1:].T),
+    )
 
-    return C
+    return C.T
 
 
 def _update_c_t(
@@ -76,23 +171,21 @@ def _update_c_t(
     return (c_t, jnp.bool_(False)), c_t
 
 
-@jit(static_argnames=["normalize_F"])
+@jit
 def update_F(
     C: Array,
     X: Array,
     F: Array,
-    lr_f: float,
+    lr_F: float,
     decorr_coeff: float,
-    normalize_F: bool = True,
 ):
     dynamics_recon_gradient = grad(_dynamics_recon_loss_all, argnums=2)(C, X, F)
-    F = F - lr_f * dynamics_recon_gradient
+    F = F - lr_F * dynamics_recon_gradient
 
     decorr_gradient = grad(_operator_decorr_loss)(F)
     F = F - decorr_coeff * decorr_gradient
 
-    if normalize_F:
-        F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
+    F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
 
     # TODO: Add soft-thresholding for L1 regularization
 
