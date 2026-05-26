@@ -26,8 +26,9 @@ def fit_no_obs(
     c_fista_tol: float = 1e-4,
     c_fista_max_iter: int = 1000,
     F_lr_init: float = 10.0,
-    F_decorr_coeff: float = 0.05,
     F_lr_decay: float = 0.99995,
+    F_decorr_coeff: float = 0.05,
+    F_l1_coeff: float = 0.03,
 ):
     num_latents = data.shape[1]
     num_timepoints = min(data.shape[2], samples_per_snippet)
@@ -49,7 +50,9 @@ def fit_no_obs(
             c_fista_max_iter=c_fista_max_iter,
             c_fista_tol=c_fista_tol,
         )
-        F_new = update_F(C, X, F, lr_F=F_lr, decorr_coeff=F_decorr_coeff)
+        F_new = update_F(
+            C, X, F, lr_F=F_lr, decorr_coeff=F_decorr_coeff, l1_coeff=F_l1_coeff
+        )
 
         reconstruction_error = float(_dynamics_recon_loss_all(C, X, F_new))
         delta_F = float(calculate_delta_F(F_new, F))
@@ -185,7 +188,7 @@ def update_F(
     F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
 
     # soft threshold to encourage sparsity TODO: compare this to unweighted
-    reweighted_l1 = _reweight_l1((F, l1_coeff))
+    reweighted_l1 = _reweight_l1(F, l1_coeff)
     F = jnp.sign(F) * jnp.maximum(jnp.abs(F) - reweighted_l1, 0)
 
     return F

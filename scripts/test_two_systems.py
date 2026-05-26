@@ -16,7 +16,7 @@ if __name__ == "__main__":
     with jax.default_device(jax.devices("cpu")[0]):
         X, C, F = simulate_two_subsystems_no_obs(3000, [4, 4], [3, 3], 50, seed=seed)
 
-        F_hat = fit_no_obs(X, 15, 200, 10, F_lr_init=5.0)
+        F_hat = fit_no_obs(X, 15, 200, 20, F_lr_init=10.0, c_l1_coeff=0.2)
         plot_Fs(F)
         plot_Fs(F_hat)
 

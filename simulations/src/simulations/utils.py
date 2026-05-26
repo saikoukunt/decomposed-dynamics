@@ -44,11 +44,11 @@ def generate_switching_c(
     while t < num_timepoints - 1:
         key, length_key, motif_key = jr.split(key, 3)
 
-        active_length = min_switch_time + jr.randint(
-            length_key, 1, 0, max_extra_switch_time
+        active_length = (
+            min_switch_time + jr.randint(length_key, 1, 0, max_extra_switch_time)[0]
         )
         end_time = min(t + active_length, num_timepoints - 1)
-        active_motif = jr.randint(motif_key, 1, 0, num_motifs + 1)
+        active_motif = jr.randint(motif_key, 1, 0, num_motifs + 1)[0]
 
         if active_motif != 0:
             C[active_motif - 1, t:end_time] = 1
