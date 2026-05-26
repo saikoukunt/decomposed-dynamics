@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
-from tqdm import tqdm, trange
+from tqdm import trange
 
 from .extract_snippets import extract_snippets
 from .loss_functions import (
@@ -160,7 +160,7 @@ def _update_c_t(
     # solve reweighted L1 using previous as warm start
     c_t, _ = solver.run(
         c_t,
-        hyperparams_prox=l1_coeff / (1 + reweight_coeff * jnp.abs(c_t)),
+        hyperparams_prox=_reweight_l1(c_t, l1_coeff),
         FX_t=FX_t,
         X_tplus1=X_tplus1,
         c_tminus1=c_tminus1,
@@ -173,11 +173,7 @@ def _update_c_t(
 
 @jit
 def update_F(
-    C: Array,
-    X: Array,
-    F: Array,
-    lr_F: float,
-    decorr_coeff: float,
+    C: Array, X: Array, F: Array, lr_F: float, decorr_coeff: float, l1_coeff: float
 ):
     dynamics_recon_gradient = grad(_dynamics_recon_loss_all, argnums=2)(C, X, F)
     F = F - lr_F * dynamics_recon_gradient
@@ -185,8 +181,16 @@ def update_F(
     decorr_gradient = grad(_operator_decorr_loss)(F)
     F = F - decorr_coeff * decorr_gradient
 
+    # normalize by operator norm
     F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
 
-    # TODO: Add soft-thresholding for L1 regularization
+    # soft threshold to encourage sparsity TODO: compare this to unweighted
+    reweighted_l1 = _reweight_l1((F, l1_coeff))
+    F = jnp.sign(F) * jnp.maximum(jnp.abs(F) - reweighted_l1, 0)
 
     return F
+
+
+@jit
+def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Array:
+    return l1_coeff / (1 + reweight_coeff * jnp.abs(x))
