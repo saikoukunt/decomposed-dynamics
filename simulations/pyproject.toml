@@ -1,0 +1,16 @@
+[project]
+name = "simulations"
+version = "0.1.0"
+description = "Simulations for decomposed dynamical systems"
+requires-python = ">=3.12"
+dependencies = ["decomposed-dynamics"]
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+decomposed-dynamics = { workspace = true }
+
+[dependency-groups]
+dev = []

@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from decomposed-dynamics!")
+from .extract_snippets import extract_snippets

@@ -11,17 +11,22 @@ dependencies = [
     "jax[cuda13]>=0.10.0",
     "jaxopt>=0.8.5",
     "optax>=0.2.8",
+    "tqdm>=4.67.3",
 ]
-
-[project.scripts]
-decomposed-dynamics = "decomposed_dynamics:main"
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]
 build-backend = "uv_build"
 
+[tool.uv.sources]
+simulations = {workspace = true}
+
+[tool.uv.workspace]
+members = ["simulations"]
+
 [dependency-groups]
 dev = [
     "matplotlib>=3.10.9",
-    "seaborn>=0.13.2",
+    "simulations",
 ]
+
