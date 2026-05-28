@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jax import Array
+from jax import Array, jit
 
 
 def extract_snippets(
@@ -29,3 +29,21 @@ def extract_snippets(
         snippet_times[i] = [t_start, t_end]
 
     return jnp.array(snippets), jnp.array(snippet_times)
+
+
+@jit
+def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Array:
+    reweighted_coeffs = _reweight_l1(x, l1_coeff, reweight_coeff)
+    x = jnp.sign(x) * jnp.maximum(jnp.abs(x) - reweighted_coeffs, 0)
+
+    return x
+
+
+@jit
+def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Array:
+    return l1_coeff / (1 + reweight_coeff * jnp.abs(x))
+
+
+@jit
+def spectral_normalize(F: Array):
+    return F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
