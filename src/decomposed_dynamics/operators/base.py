@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, jit
 
 
 class OperatorParams(ABC):
@@ -19,6 +19,7 @@ class OperatorGroup(ABC):
     def compute_operator_flows(self, operators: OperatorParams, x: Array) -> Array:
         raise NotImplementedError
 
+    @jit
     def compute_weighted_flow(self, coeffs: Array, flows: Array) -> Array:
         return jnp.einsum("...k, ...ki -> i")
 

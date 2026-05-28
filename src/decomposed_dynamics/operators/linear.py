@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import Array
+from jax import Array, jit
 from jax.tree_util import register_dataclass
 
 from decomposed_dynamics.operators.base import OperatorGroup, OperatorParams
@@ -29,11 +29,13 @@ class LinearOperatorGroup(OperatorGroup):
 
         return LinearOperatorParams(F)
 
+    @jit
     def compute_operator_flows(
         self, operators: LinearOperatorParams, x: Array
     ) -> Array:
         return jnp.einsum("kij, ...j -> ...ki", operators.F, x)
 
+    @jit
     def apply_prox(self, operators: LinearOperatorParams) -> LinearOperatorParams:
         F = spectral_normalize(operators.F)
         F = reweighted_l1_prox(operators.F, self.l1_coeff, self.l1_reweight_coeff)
