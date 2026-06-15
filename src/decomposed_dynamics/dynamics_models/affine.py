@@ -43,7 +43,7 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         self, operators: AffineOperatorParams, x: Array
     ) -> Array:
         offsets = x - operators.b
-        return jnp.einsum("kij, ...j -> ...ki", operators.F, offsets) + operators.b
+        return jnp.einsum("kij, ...kj -> ...ki", operators.F, offsets) + operators.b
 
     @jit
     def apply_prox(
