@@ -39,7 +39,7 @@ def generate_switching_c(
     min_switch_time: int = 100,
     max_extra_switch_time: int = 300,
 ):
-    C = np.zeros((num_motifs, num_timepoints - 1))
+    C = np.zeros((num_timepoints - 1, num_motifs))
     t = 0
     while t < num_timepoints - 1:
         key, length_key, motif_key = jr.split(key, 3)
@@ -51,7 +51,7 @@ def generate_switching_c(
         active_motif = jr.randint(motif_key, 1, 0, num_motifs + 1)[0]
 
         if active_motif != 0:
-            C[active_motif - 1, t:end_time] = 1
+            C[t:end_time, active_motif - 1] = 1
 
         t = end_time
 

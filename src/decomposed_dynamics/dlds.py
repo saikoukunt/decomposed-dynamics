@@ -11,7 +11,7 @@ from .extract_snippets import extract_snippets
 from .loss_functions import (
     _bpdn_least_squares,
     _dynamics_recon_loss_all,
-    _operator_decorr_loss,
+    operator_correlation,
 )
 
 
@@ -180,13 +180,13 @@ def update_F(
     dynamics_recon_gradient = grad(_dynamics_recon_loss_all, argnums=2)(C, X, F)
     F = F - lr_F * dynamics_recon_gradient
 
-    decorr_gradient = grad(_operator_decorr_loss)(F)
+    decorr_gradient = grad(operator_correlation)(F)
     F = F - decorr_coeff * decorr_gradient
 
     # normalize by operator norm
     F = F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
 
-    # soft threshold to encourage sparsity TODO: compare this to unweighted
+    # soft threshold to encourage sparsity
     reweighted_l1 = _reweight_l1(F, l1_coeff)
     F = jnp.sign(F) * jnp.maximum(jnp.abs(F) - reweighted_l1, 0)
 

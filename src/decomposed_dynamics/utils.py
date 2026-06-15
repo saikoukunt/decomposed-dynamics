@@ -47,3 +47,9 @@ def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Arra
 @jit
 def spectral_normalize(F: Array):
     return F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
+
+
+@jit
+def operator_correlation(F: Array) -> Array:
+    pairwise_corrs = jnp.einsum("kij, lij -> kl", F, F)
+    return jnp.sum(jnp.triu(pairwise_corrs**2, k=1))

@@ -58,20 +58,20 @@ def _simulate_no_obs_state(
     total_latents = sum(num_latents)
     total_motifs = sum(num_motifs)
 
-    X = np.zeros((num_trials, total_latents, num_timepoints))
-    C = np.zeros((num_trials, total_motifs, num_timepoints - 1))
+    X = np.zeros((num_trials, num_timepoints, total_latents))
+    C = np.zeros((num_trials, num_timepoints - 1, total_motifs))
 
     for trial in range(num_trials):
         key, c1_key, c2_key, x_key = jr.split(key, 4)
 
-        C[trial][: num_motifs[0]] = generate_switching_c(
+        C[trial, :, : num_motifs[0]] = generate_switching_c(
             num_motifs[0],
             num_timepoints,
             c1_key,
             min_switch_time,
             max_extra_switch_time,
         )
-        C[trial][num_motifs[0] :] = generate_switching_c(
+        C[trial, :, num_motifs[0] :] = generate_switching_c(
             num_motifs[1],
             num_timepoints,
             c2_key,
@@ -96,29 +96,29 @@ def _simulate_latent_trajectory(
     total_latents = sum(num_latents)
 
     F_t = np.zeros((total_latents, total_latents))
-    X = np.zeros((total_latents, num_timepoints))
+    X = np.zeros((num_timepoints, total_latents))
 
     key, subkey = jr.split(key)
-    X[:, 0] = jr.normal(subkey, (total_latents))
-    X[: num_latents[0], 0] /= np.linalg.norm(X[: num_latents[0], 0])
-    X[num_latents[0] :, 0] /= np.linalg.norm(X[num_latents[0] :, 0])
+    X[0, :] = jr.normal(subkey, (total_latents))
+    X[0, : num_latents[0]] /= np.linalg.norm(X[0, : num_latents[0]])
+    X[0, num_latents[0] :] /= np.linalg.norm(X[0, num_latents[0] :])
 
     for t in range(1, num_timepoints):
-        F_t = np.einsum("k, kij -> ij", C[:, t - 1], F)
+        F_t = np.einsum("k, kij -> ij", C[t - 1, :], F)
 
         key, *subkeys = jr.split(key, 3)
-        if (X[: num_latents[0], t - 1] == 0).all() and (
-            C[: num_motifs[0], t - 1] != 0
+        if (X[t - 1, : num_latents[0]] == 0).all() and (
+            C[t - 1, : num_motifs[0]] != 0
         ).any():
-            X[: num_latents[0], t - 1] = jr.normal(subkeys[0], (num_latents[0]))
-            X[: num_latents[0], t - 1] /= np.linalg.norm(X[: num_latents[0], t - 1])
+            X[t - 1, : num_latents[0]] = jr.normal(subkeys[0], (num_latents[0]))
+            X[t - 1, : num_latents[0]] /= np.linalg.norm(X[t - 1, : num_latents[0]])
 
-        if (X[num_latents[0] :, t - 1] == 0).all() and (
-            C[num_motifs[0] :, t - 1] != 0
+        if (X[t - 1, num_latents[0] :] == 0).all() and (
+            C[t - 1, num_motifs[0] :] != 0
         ).any():
-            X[num_latents[0] :, t - 1] = jr.normal(subkeys[1], (num_latents[0]))
-            X[num_latents[0] :, t - 1] /= np.linalg.norm(X[num_latents[0] :, t - 1])
+            X[t - 1, num_latents[0] :] = jr.normal(subkeys[1], (num_latents[0]))
+            X[t - 1, num_latents[0] :] /= np.linalg.norm(X[t - 1, num_latents[0] :])
 
-        X[:, t] = np.einsum("ij, j -> i", F_t, X[:, t - 1])
+        X[t, :] = np.einsum("ij, j -> i", F_t, X[t - 1, :])
 
     return X

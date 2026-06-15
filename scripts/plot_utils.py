@@ -30,6 +30,6 @@ def plot_X(X):
 
 def plot_C(C):
     plt.figure(figsize=(10, 2))
-    plt.imshow(C, aspect="auto", interpolation="none")
+    plt.imshow(C.T, aspect="auto", interpolation="none")
 
     plt.tight_layout()
