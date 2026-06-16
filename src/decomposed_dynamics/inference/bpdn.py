@@ -13,7 +13,7 @@ from decomposed_dynamics.utils import _reweight_l1
 def bpdn_inference(Y: Array, D: Array, operators: OperatorParams, **kwargs):
     pass
 
-
+@jit
 def bpdn_inference_no_obs(
     dynamics_model: DecomposedDynamicsModel,
     operators: OperatorParams,
@@ -35,8 +35,8 @@ def _bpdn_infer_one_no_obs_trial(
     dynamics_model: DecomposedDynamicsModel,
     operators: OperatorParams,
     X: Array,
-    smooth_coeff: float = 0.1,
     l1_coeff: float = 0.4,
+    smooth_coeff: float = 0.4,
     max_iter: int = 3000,
     tol: float = 1e-4,
 ) -> Array:
@@ -60,7 +60,7 @@ def _bpdn_infer_one_no_obs_trial(
     return C
 
 
-@jit(static_argnames=["solver"])
+#@jit(static_argnames=["solver"])
 def _bpdn_infer_one_no_obs_timestep(
     carry: tuple[Array, Array],
     Xs: tuple[Array, Array],
