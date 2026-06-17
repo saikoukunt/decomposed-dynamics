@@ -27,7 +27,7 @@ def fit_no_obs(
         "tol": 1e-4,
     },
 ) -> OperatorParams:
-    num_timepoints = min(data.shape[2], samples_per_snippet)
+    num_timepoints = min(data.shape[1], samples_per_snippet)
 
     lr = lr_init
     progress_bar = trange(max_iter)
