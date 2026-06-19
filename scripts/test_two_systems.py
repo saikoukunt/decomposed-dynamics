@@ -4,6 +4,8 @@ import sys
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
+jax.devices()
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from plot_utils import plot_C, plot_Fs, plot_X
