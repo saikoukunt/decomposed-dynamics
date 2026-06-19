@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import Array, grad, jit, vmap
 from jax.tree_util import register_dataclass
-from jaxopt.prox import prox_group_lasso
+from jaxopt.prox import prox_group_lasso, prox_lasso
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
@@ -56,8 +56,7 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         F = spectral_normalize(operators.F)
         F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
 
-        reweighted_coeffs = 0.5 / (1 + vmap(jnp.linalg.norm)(operators.b))
-        b = vmap(prox_group_lasso, in_axes=(0, 0))(operators.b, reweighted_coeffs)
+        b = prox_lasso(operators.b, l1reg=0.4)
 
         return replace(operators, F=F, b=b)
 
