@@ -18,8 +18,8 @@ def fit_no_obs(
     lr_init: float = 10.0,
     lr_decay: float = 0.9995,
     max_iter: int = 200,
-    operator_decorr_params: dict = {"operator_decorr_coeff": 0.05},
-    operator_prox_params: dict = {"l1_coeff": 0.03, "l1_reweight_coeff": 200},
+    operator_decorr_params: dict = {"operator_decorr_coeff": 0.0},
+    operator_prox_params: dict = {"l1_coeff": 0.05, "l1_reweight_coeff": 200},
     inference_params: dict = {
         "l1_coeff": 0.2,
         "smooth_coeff": 0.4,
