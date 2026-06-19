@@ -3,8 +3,9 @@ from functools import partial
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import Array, grad, jit
+from jax import Array, grad, jit, vmap
 from jax.tree_util import register_dataclass
+from jaxopt.prox import prox_group_lasso
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
@@ -42,7 +43,7 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
     def compute_operator_flows(
         self, operators: AffineOperatorParams, x: Array
     ) -> Array:
-        offsets = x - operators.b
+        offsets = x[..., None, :] - operators.b
         return jnp.einsum("kij, ...kj -> ...ki", operators.F, offsets) + operators.b
 
     @jit
@@ -55,7 +56,10 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         F = spectral_normalize(operators.F)
         F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
 
-        return replace(operators, F=F)
+        reweighted_coeffs = 0.5 / (1 + vmap(jnp.linalg.norm)(operators.b))
+        b = vmap(prox_group_lasso, in_axes=(0, 0))(operators.b, reweighted_coeffs)
+
+        return replace(operators, F=F, b=b)
 
     @jit
     def decorrelate_operators(
