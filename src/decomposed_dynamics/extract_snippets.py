@@ -54,6 +54,7 @@ def extract_snippets_dict(trial_data: npt.NDArray, num_snippets: int, samples_pe
     trial_inds = rng.choice(num_trials, num_snippets)
 
     for i, trial_ind in enumerate(trial_inds):
-        snippets[i], snippet_times[i] = extract_snippets(trial_data[dict_keys[i]], snippet_length, seed)
+        snippets[i], snippet_times[i] = extract_snippets(trial_data[dict_keys[trial_ind]], snippet_length, seed)
 
     return jnp.array(snippets), jnp.array(snippet_times)
+
