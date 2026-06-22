@@ -34,20 +34,23 @@ if __name__ == "__main__":
     print(f"size of trial_ids: {trial_ids.shape}")
     print(f"Loaded {len(rnnAct)} trials of RNN activations, each with shape {rnnAct["0"].shape}.")
     
-    c_l1 = 0.15;
+    c_l1 = 0.3;
     c_smooth = 0.1;
     with jax.default_device(jax.devices("cpu")[0]):
         
         #X, C, F = simulate_two_subsystems_no_obs(3000, [4, 4], [3, 3], 50, seed=seed)
-        F_hat = fit_no_obs(rnnAct, 20, 30, 30, max_iter=50, F_lr_init=10, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth, F_l1_coeff=0.001,F_decorr_coeff=0.0)
+        F_hat = fit_no_obs(rnnAct, 20, 30, 30, max_iter=100, F_lr_init=10, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth, F_l1_coeff=0.001,F_decorr_coeff=0.0)
         C_hat = final_c_fit(rnnAct, F_hat, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth)
 
         print(f"run finished, plotting results...")
-        plot_Cs(C_hat, trial_ids=trial_ids)
+        #plot_Cs(C_hat, trial_ids=trial_ids)
         plot_Cs_oneF(C_hat, trial_ids=trial_ids, Fid=2)
         plot_Cs_random_trials(C_hat, 10)
         plot_Fs(F_hat)
         plt.show()
 
-    with open('dLDS_output_jax.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
-        pickle.dump([F_hat, C_hat, trial_ids], f)
+    # repackage into trial-based aggregation of C's for saving
+    C_hat_repackaged = {}
+
+    with open('dLDS_output_jax_2.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
+        pickle.dump([F_hat, C_hat, trial_ids, c_l1, c_smooth], f)
