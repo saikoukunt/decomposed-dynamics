@@ -31,7 +31,7 @@ if __name__ == "__main__":
     #    ll += 1
     #trial_ids = jnp.array(trial_ids)
 
-    with open('dLDS_output_jax_2.pkl', 'rb') as f:  # Python 3: open(..., 'rb')
+    with open('dLDS_output_jax_2.pkl', 'rb') as f: 
         F_hat, C_hat, trial_ids, c_l1, c_smooth = pickle.load(f)
             # repackage into trial-based aggregation of C's for saving
     C_hat_repackaged = repackage_C_hat(C_hat, trial_ids)

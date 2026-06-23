@@ -21,7 +21,7 @@ def min_second_dim_size(data: dict) -> int:
 
     return int(min(sizes))
 
-def extract_snippets(
+def extract_one_snippet(
     trial_data: npt.NDArray, samples_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     num_observations = trial_data.shape[0]
@@ -40,7 +40,7 @@ def extract_snippets(
 
     return jnp.array(snippets), jnp.array(snippet_times)
 
-def extract_snippets_dict(trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int, seed: int
+def extract_snippets(trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     rng = np.random.default_rng(seed)
 
@@ -54,7 +54,7 @@ def extract_snippets_dict(trial_data: npt.NDArray, num_snippets: int, samples_pe
     trial_inds = rng.choice(num_trials, num_snippets)
 
     for i, trial_ind in enumerate(trial_inds):
-        snippets[i], snippet_times[i] = extract_snippets(trial_data[dict_keys[trial_ind]], snippet_length, seed)
+        snippets[i], snippet_times[i] = extract_one_snippet(trial_data[dict_keys[trial_ind]], snippet_length, seed)
 
     return jnp.array(snippets), jnp.array(snippet_times)
 

@@ -29,13 +29,6 @@ def plot_X(X):
 
     plt.tight_layout()
 
-
-def plot_C(C):
-    plt.figure(figsize=(10, 2))
-    plt.imshow(C, aspect="auto", interpolation="none")
-
-    plt.tight_layout()
-
 def plot_Cs(C, trial_ids: np.array = []):
     trial_keys = list(C.keys())
     num_trials = len(C)

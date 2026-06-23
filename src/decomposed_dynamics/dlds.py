@@ -7,9 +7,7 @@ from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
 from tqdm import trange
 
-from .extract_snippets import extract_snippets
-from .extract_snippets import extract_snippets_dict
-from .extract_snippets import min_second_dim_size
+from .extract_snippets import extract_snippets, min_second_dim_size 
 from .loss_functions import (
     _bpdn_least_squares,
     _dynamics_recon_loss_all,
@@ -44,7 +42,7 @@ def fit_no_obs(
     F_lr = F_lr_init
     pbar = trange(max_iter)
     for i in pbar:
-        X, _ = extract_snippets_dict(data, num_snippets, num_timepoints, seed=i)
+        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
 
         C = infer_no_obs_state(
             X,
