@@ -8,9 +8,9 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from plot_utils import plot_Cs_oneF, plot_Fs, plot_Cs, plot_Cs_random_trials, repackage_C_hat
+from plot_utils import plot_Cs_one_F, plot_Fs, plot_Cs, plot_Cs_random_trials, repackage_C_hat
 import numpy as np
-from decomposed_dynamics.dlds import fit_no_obs, final_c_fit
+from decomposed_dynamics.dlds import fit_no_obs, infer_no_obs_state_all_trials
 import pickle
 
 

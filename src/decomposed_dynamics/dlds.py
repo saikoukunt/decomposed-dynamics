@@ -2,12 +2,13 @@ import functools
 
 import jax
 import jax.numpy as jnp
+import tqdm
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
 from tqdm import trange
 
-from .extract_snippets import extract_snippets, min_second_dim_size 
+from .extract_snippets import extract_snippets, min_trial_length
 from .loss_functions import (
     _bpdn_least_squares,
     _dynamics_recon_loss_all,
@@ -32,8 +33,7 @@ def fit_no_obs(
 ):
     trial_keys = list(data.keys())
     num_latents = data[trial_keys[0]].shape[0]
-    min_trial_length = min_second_dim_size(data)
-    num_timepoints = min(min_trial_length, samples_per_snippet)
+    num_timepoints = min(samples_per_snippet, min_trial_length(data))
 
     key = jax.random.key(42)
     F = jax.random.normal(key, (num_motifs, num_latents, num_latents))
@@ -64,34 +64,41 @@ def fit_no_obs(
 
         F = F_new
         F_lr *= F_lr_decay
+
     return F
 
-def final_c_fit(data: dict,
+
+def infer_no_obs_state_all_trials(
+    data: dict,
     F: Array,
     c_l1_coeff: float = 0.2,
     c_smooth_coeff: float = 0.4,
     c_fista_tol: float = 1e-4,
     c_fista_max_iter: int = 1000,
 ):
-    print(f"Final loop to recompute dynamics coeffients")
+    tqdm.write("Final loop to recompute dynamics coeffients")
     trial_keys = list(data.keys())
-    C_final = {}
+    C = {}
     pbar = trange(len(trial_keys))
+
     for i in pbar:
         trial_key = trial_keys[i]
-        C_final[trial_key] = infer_no_obs_state(
-                jnp.expand_dims(data[trial_key], 0),
-                F,
-                c_smooth_coeff=c_smooth_coeff,
-                c_l1_coeff=c_l1_coeff,
-                c_fista_max_iter=c_fista_max_iter,
-                c_fista_tol=c_fista_tol,
-            )
-        reconstruction_error = float(_dynamics_recon_loss_all(C_final[trial_key], jnp.expand_dims(data[trial_key], 0), F))
-        pbar.set_postfix(
-            recon_err=f"{reconstruction_error:.4f}"
+        C[trial_key] = infer_no_obs_state(
+            jnp.expand_dims(data[trial_key], 0),
+            F,
+            c_smooth_coeff=c_smooth_coeff,
+            c_l1_coeff=c_l1_coeff,
+            c_fista_max_iter=c_fista_max_iter,
+            c_fista_tol=c_fista_tol,
         )
-    return C_final
+        reconstruction_error = float(
+            _dynamics_recon_loss_all(
+                C[trial_key], jnp.expand_dims(data[trial_key], 0), F
+            )
+        )
+        pbar.set_postfix(recon_err=f"{reconstruction_error:.4f}")
+
+    return C
 
 
 def infer_no_obs_state(
@@ -123,7 +130,7 @@ def calculate_delta_F(F_new, F_old):
 @jit
 def _calculate_one_delta_F(F_new, F_old):
     delta_F = F_new - F_old
-    #delta_F = F_new # - F_old
+    # delta_F = F_new # - F_old
     delta_F = jnp.einsum("ij, ij", delta_F, delta_F)
     delta_F /= (F_old**2).sum()
 
