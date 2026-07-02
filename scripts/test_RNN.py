@@ -37,7 +37,7 @@ if __name__ == "__main__":
     c_l1 = 0.3;
     c_smooth = 0.1;
     with jax.default_device(jax.devices("cpu")[0]):
-        F_hat = fit_no_obs(rnnAct, 20, 10, 10, max_iter=10, F_lr_init=10, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth, F_l1_coeff=0.001,F_decorr_coeff=0.0)
+        F_hat = fit_no_obs(rnnAct, 20, 30, 30, max_iter=100, F_lr_init=10, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth, F_l1_coeff=0.001,F_decorr_coeff=0.0)
         C_hat = infer_no_obs_state_all_trials(rnnAct, F_hat, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth)
 
         print(f"run finished, plotting results...")
@@ -51,5 +51,5 @@ if __name__ == "__main__":
     for i, trial_id in enumerate(trial_ids):
         C_hat_repackaged[str(int(trial_id))] = np.append(C_hat[i])
     # Save the data ouput to a pickle file
-    with open('dLDS_output_jax_2.pkl', 'wb') as f:  
-        pickle.dump([F_hat, C_hat, trial_ids, c_l1, c_smooth], f)
+    #with open('dLDS_output_jax_2.pkl', 'wb') as f:  
+    #    pickle.dump([F_hat, C_hat, trial_ids, c_l1, c_smooth], f)

@@ -46,7 +46,7 @@ def extract_snippets(
     trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     rng = np.random.default_rng(seed)
-    snippet_seeds = rng.integers(num_snippets)
+    snippet_seeds = rng.integers(num_snippets,size=num_snippets)
 
     num_trials = len(trial_data)
     dict_keys = list(trial_data.keys())

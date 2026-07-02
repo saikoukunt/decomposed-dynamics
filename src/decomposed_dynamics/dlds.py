@@ -2,7 +2,7 @@ import functools
 
 import jax
 import jax.numpy as jnp
-import tqdm
+from tqdm import tqdm
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
