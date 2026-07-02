@@ -2,16 +2,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_Fs(F):
+def plot_Fs(F, vmin=None, vmax=None):
     num_dynamics = F.shape[0]
     num_rows = (num_dynamics - 1) // 6 + 1
     num_cols = min(6, num_dynamics)
-    maxabsval = np.max(np.abs(F))
+
+    max_absolute_value = np.max(np.abs(F))
+    if vmin is None:
+        vmin = -max_absolute_value
+    if vmax is None:
+        vmax = max_absolute_value
 
     plt.figure(figsize=(num_cols, num_rows))
+
     for i in range(F.shape[0]):
         plt.subplot(num_rows, num_cols, i + 1)
-        plt.imshow(F[i], aspect="auto", vmin=-maxabsval, vmax=maxabsval)
+        plt.imshow(F[i], aspect="auto", vmin=vmin, vmax=vmax)
         plt.axis("off")
 
     plt.tight_layout()
