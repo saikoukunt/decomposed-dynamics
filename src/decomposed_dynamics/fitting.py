@@ -5,6 +5,7 @@ from tqdm import trange
 
 from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel, OperatorParams
 from decomposed_dynamics.inference import bpdn_inference_no_obs
+from decomposed_dynamics.observation_models import ObservationModel, ObservationParams
 from decomposed_dynamics.utils import extract_snippets
 
 
@@ -31,7 +32,6 @@ def fit_no_obs(
 
     lr = lr_init
     progress_bar = trange(max_iter)
-    dynamics_recon_value_and_grad = jit(value_and_grad(compute_dynamics_recon_loss, -1))
 
     for i in progress_bar:
         X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
@@ -109,3 +109,20 @@ def compute_dynamics_recon_loss_sequence(
     predictions = dynamics_model.predict_next_state(C, flows)
 
     return l2_loss(predictions, X[1:, :]).sum(axis=-1).mean()
+
+
+dynamics_recon_value_and_grad = jit(value_and_grad(compute_dynamics_recon_loss, -1))
+
+
+@jit
+def compute_data_nll(
+    observations: Array,
+    x: Array,
+    observation_model: ObservationModel,
+    params: ObservationParams,
+):
+    rates = observation_model.predict_rates(params, x)
+    return observation_model.neg_log_likelihood(rates, observations)
+
+
+data_nll_value_and_grad = jit(value_and_grad(compute_data_nll, -1), static_argnums=0)
