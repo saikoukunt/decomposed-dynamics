@@ -59,7 +59,7 @@ def _simulate_no_obs_state(
     total_motifs = sum(num_motifs)
 
     X = np.zeros((num_trials, num_timepoints, total_latents))
-    C = np.zeros((num_trials, num_timepoints - 1, total_motifs))
+    C = np.zeros((num_trials, num_timepoints, total_motifs))
 
     for trial in range(num_trials):
         key, c1_key, c2_key, x_key = jr.split(key, 4)
@@ -104,17 +104,17 @@ def _simulate_latent_trajectory(
     X[0, num_latents[0] :] /= np.linalg.norm(X[0, num_latents[0] :])
 
     for t in range(1, num_timepoints):
-        F_t = np.einsum("k, kij -> ij", C[t - 1, :], F)
+        F_t = np.einsum("k, kij -> ij", C[t, :], F)
 
         key, *subkeys = jr.split(key, 3)
         if (X[t - 1, : num_latents[0]] == 0).all() and (
-            C[t - 1, : num_motifs[0]] != 0
+            C[t, : num_motifs[0]] != 0
         ).any():
             X[t - 1, : num_latents[0]] = jr.normal(subkeys[0], (num_latents[0]))
             X[t - 1, : num_latents[0]] /= np.linalg.norm(X[t - 1, : num_latents[0]])
 
         if (X[t - 1, num_latents[0] :] == 0).all() and (
-            C[t - 1, num_motifs[0] :] != 0
+            C[t, num_motifs[0] :] != 0
         ).any():
             X[t - 1, num_latents[0] :] = jr.normal(subkeys[1], (num_latents[0]))
             X[t - 1, num_latents[0] :] /= np.linalg.norm(X[t - 1, num_latents[0] :])
