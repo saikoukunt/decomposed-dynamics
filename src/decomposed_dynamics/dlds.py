@@ -30,8 +30,7 @@ def fit_no_obs(
     F_decorr_coeff: float = 0.05,
     F_l1_coeff: float = 0.03,
 ):
-    num_latents = data.shape[1]
-    num_timepoints = min(data.shape[2], samples_per_snippet)
+    num_latents = data[0].shape[0]
 
     key = jax.random.key(42)
     F = jax.random.normal(key, (num_motifs, num_latents, num_latents))
@@ -40,7 +39,7 @@ def fit_no_obs(
     F_lr = F_lr_init
     pbar = trange(max_iter)
     for i in pbar:
-        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+        X, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
         C = infer_no_obs_state(
             X,
