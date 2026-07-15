@@ -30,13 +30,12 @@ def fit(
         "tol": 1e-4,
     },
 ) -> OperatorParams:
-    num_timepoints = min(data.shape[1], samples_per_snippet)
 
     lr = lr_init
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
-        Y, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+        Y, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
         X, C = bpdn_inference(
             obs_model,
@@ -94,13 +93,12 @@ def fit_no_obs(
         "tol": 1e-4,
     },
 ) -> OperatorParams:
-    num_timepoints = min(data.shape[1], samples_per_snippet)
 
     lr = lr_init
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
-        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+        X, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
         C = bpdn_inference_no_obs(dynamics_model, operators, X, **inference_params)
 

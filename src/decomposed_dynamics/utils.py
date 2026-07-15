@@ -24,7 +24,7 @@ def extract_snippets(
     for i, trial_ind in enumerate(trial_inds):
         t_start = rng.choice(trial_length - snippet_length + 1)
         t_end = t_start + snippet_length
-        snippets[i] = trial_data[trial_ind, t_start:t_end, :]
+        snippets[i] = trial_data[trial_ind][t_start:t_end, :]
         snippet_times[i] = [t_start, t_end]
 
     return jnp.array(snippets), jnp.array(snippet_times)
