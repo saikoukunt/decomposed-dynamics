@@ -6,10 +6,13 @@ from tqdm import trange
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
+
+jax.devices()
+
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
-from plot_utils import plot_C, plot_Fs, plot_X
+from plot_utils import plot_Fs, plot_X
 from simulations.two_switching_systems import simulate_two_subsystems_no_obs
 
 from decomposed_dynamics.dynamics_models import (
