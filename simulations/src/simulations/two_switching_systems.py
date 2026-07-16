@@ -40,7 +40,10 @@ def simulate_two_subsystems_no_obs(
         max_extra_switch_time,
     )
 
-    return jnp.array(X), jnp.array(C), jnp.array(F)
+    X = {i: X[i] for i in range(num_trials)}
+    C = {i: C[i] for i in range(num_trials)}
+
+    return X, C, jnp.array(F)
 
 
 def _simulate_no_obs_state(

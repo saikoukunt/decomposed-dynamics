@@ -2,13 +2,12 @@ import functools
 
 import jax
 import jax.numpy as jnp
-from tqdm import tqdm
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
-from tqdm import trange
+from tqdm import tqdm, trange
 
-from .extract_snippets import extract_snippets, min_trial_length
+from .extract_snippets import extract_snippets
 from .loss_functions import (
     _bpdn_least_squares,
     _dynamics_recon_loss_all,
@@ -33,7 +32,6 @@ def fit_no_obs(
 ):
     trial_keys = list(data.keys())
     num_latents = data[trial_keys[0]].shape[0]
-    num_timepoints = min(samples_per_snippet, min_trial_length(data))
 
     key = jax.random.key(42)
     F = jax.random.normal(key, (num_motifs, num_latents, num_latents))
@@ -42,7 +40,7 @@ def fit_no_obs(
     F_lr = F_lr_init
     pbar = trange(max_iter)
     for i in pbar:
-        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+        X, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
         C = infer_no_obs_state(
             X,

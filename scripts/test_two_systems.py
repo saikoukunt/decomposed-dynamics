@@ -4,6 +4,7 @@ import sys
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
+
 jax.devices()
 
 import jax.numpy as jnp

@@ -17,7 +17,7 @@ def plot_Fs(F, vmin=None, vmax=None):
 
     for i in range(F.shape[0]):
         plt.subplot(num_rows, num_cols, i + 1)
-        plt.imshow(F[i], aspect="auto", vmin=vmin, vmax=vmax)
+        plt.imshow(F[i], aspect="equal", vmin=vmin, vmax=vmax)
         plt.axis("off")
 
     plt.tight_layout()
