@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
-from tqdm import trange
+from tqdm import tqdm, trange
 
 from .extract_snippets import extract_snippets
 from .loss_functions import (
@@ -16,7 +16,7 @@ from .loss_functions import (
 
 
 def fit_no_obs(
-    data: Array,
+    data: dict,
     num_motifs: int,
     samples_per_snippet: int,
     num_snippets: int,
@@ -30,7 +30,8 @@ def fit_no_obs(
     F_decorr_coeff: float = 0.05,
     F_l1_coeff: float = 0.03,
 ):
-    num_latents = data[0].shape[0]
+    trial_keys = list(data.keys())
+    num_latents = data[trial_keys[0]].shape[0]
 
     key = jax.random.key(42)
     F = jax.random.normal(key, (num_motifs, num_latents, num_latents))
@@ -65,6 +66,39 @@ def fit_no_obs(
     return F
 
 
+def infer_no_obs_state_all_trials(
+    data: dict,
+    F: Array,
+    c_l1_coeff: float = 0.2,
+    c_smooth_coeff: float = 0.4,
+    c_fista_tol: float = 1e-4,
+    c_fista_max_iter: int = 1000,
+):
+    tqdm.write("Final loop to recompute dynamics coeffients")
+    trial_keys = list(data.keys())
+    C = {}
+    pbar = trange(len(trial_keys))
+
+    for i in pbar:
+        trial_key = trial_keys[i]
+        C[trial_key] = infer_no_obs_state(
+            jnp.expand_dims(data[trial_key], 0),
+            F,
+            c_smooth_coeff=c_smooth_coeff,
+            c_l1_coeff=c_l1_coeff,
+            c_fista_max_iter=c_fista_max_iter,
+            c_fista_tol=c_fista_tol,
+        )
+        reconstruction_error = float(
+            _dynamics_recon_loss_all(
+                C[trial_key], jnp.expand_dims(data[trial_key], 0), F
+            )
+        )
+        pbar.set_postfix(recon_err=f"{reconstruction_error:.4f}")
+
+    return C
+
+
 def infer_no_obs_state(
     X: Array,
     F: Array,
@@ -94,6 +128,7 @@ def calculate_delta_F(F_new, F_old):
 @jit
 def _calculate_one_delta_F(F_new, F_old):
     delta_F = F_new - F_old
+    # delta_F = F_new # - F_old
     delta_F = jnp.einsum("ij, ij", delta_F, delta_F)
     delta_F /= (F_old**2).sum()
 

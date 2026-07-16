@@ -4,9 +4,12 @@ import sys
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
+
+jax.devices()
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from plot_utils import plot_C, plot_Fs, plot_X
+from plot_utils import plot_Fs, plot_X
 from simulations.two_switching_systems import simulate_two_subsystems_no_obs
 
 from decomposed_dynamics.dlds import fit_no_obs, infer_no_obs_state
