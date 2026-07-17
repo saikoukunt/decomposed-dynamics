@@ -6,9 +6,11 @@ from jax import Array, jit
 def extract_snippets(
     trial_data: dict, num_snippets: int, samples_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
+    keys = list(trial_data.keys())
+
     num_trials = len(trial_data)
-    num_observations = trial_data[0].shape[1]
-    trial_length = min(trial_data[int(key)].shape[0] for key in trial_data)
+    num_observations = trial_data[keys[0]].shape[1]
+    trial_length = min(trial_data[key].shape[0] for key in trial_data)
 
     rng = np.random.default_rng(seed)
 

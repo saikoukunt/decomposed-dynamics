@@ -3,14 +3,15 @@ from functools import partial
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import Array, grad, jit, vmap
+from jax import Array, grad, jit
 from jax.tree_util import register_dataclass
-from jaxopt.prox import prox_group_lasso, prox_lasso
+from jaxopt.prox import prox_lasso
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
     OperatorParams,
 )
+from decomposed_dynamics.dynamics_models.linear import LinearOperatorHyperparams
 from decomposed_dynamics.utils import (
     operator_correlation,
     reweighted_l1_prox,
@@ -23,6 +24,11 @@ from decomposed_dynamics.utils import (
 class AffineOperatorParams(OperatorParams):
     F: Array
     b: Array
+
+
+@dataclass(frozen=True)
+class AffineOperatorHyperparams(LinearOperatorHyperparams):
+    b_l1_coeff: float = 0.4
 
 
 @partial(
@@ -39,6 +45,9 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
 
         return AffineOperatorParams(F, b)
 
+    def initialize_hyperparams(self, **kwargs) -> AffineOperatorHyperparams:
+        return AffineOperatorHyperparams(**kwargs)
+
     @jit
     def compute_operator_flows(
         self, operators: AffineOperatorParams, x: Array
@@ -46,25 +55,42 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         offsets = x[..., None, :] - operators.b
         return jnp.einsum("kij, ...kj -> ...ki", operators.F, offsets) + operators.b
 
-    @jit
-    def apply_prox(
-        self,
-        operators: AffineOperatorParams,
-        l1_coeff: float,
-        l1_reweight_coeff: float = 200,
-    ) -> AffineOperatorParams:
-        F = spectral_normalize(operators.F)
-        F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
-
-        b = prox_lasso(operators.b, l1reg=0.4)
+    @jit(static_argnames=["hyperparams"])
+    def regularize_operators(
+        self, operators: AffineOperatorParams, hyperparams: AffineOperatorHyperparams
+    ):
+        F, b = self.apply_prox(
+            operators.F,
+            operators.b,
+            hyperparams.l1_coeff,
+            hyperparams.l1_reweight_coeff,
+            hyperparams.b_l1_coeff,
+        )
+        F = self.decorrelate_operators(F, hyperparams.decorr_coeff)
 
         return replace(operators, F=F, b=b)
 
     @jit
-    def decorrelate_operators(
-        self, operators: AffineOperatorParams, operator_decorr_coeff: float
+    def apply_prox(
+        self,
+        F: Array,
+        b: Array,
+        l1_coeff: float,
+        l1_reweight_coeff: float,
+        b_l1_coeff: float,
     ) -> AffineOperatorParams:
-        decorr_gradient = grad(operator_correlation)(operators.F)
-        F = operators.F - operator_decorr_coeff * decorr_gradient
+        F = spectral_normalize(F)
+        F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
 
-        return replace(operators, F=F)
+        b = prox_lasso(b, l1reg=b_l1_coeff)
+
+        return F, b
+
+    @jit
+    def decorrelate_operators(
+        self, F: Array, operator_decorr_coeff: float
+    ) -> AffineOperatorParams:
+        decorr_gradient = grad(operator_correlation)(F)
+        F = F - operator_decorr_coeff * decorr_gradient
+
+        return F

@@ -8,6 +8,10 @@ class OperatorParams(ABC):
     pass
 
 
+class OperatorHyperparams(ABC):
+    pass
+
+
 class DecomposedDynamicsModel(ABC):
     def __init__(self, num_operators, num_latents):
         self.num_operators = num_operators
@@ -15,6 +19,10 @@ class DecomposedDynamicsModel(ABC):
 
     @abstractmethod
     def initialize_params(self, key: Array, **kwargs) -> OperatorParams:
+        raise NotImplementedError
+
+    @abstractmethod
+    def initialize_hyperparams(self, **kwargs) -> OperatorHyperparams:
         raise NotImplementedError
 
     @abstractmethod

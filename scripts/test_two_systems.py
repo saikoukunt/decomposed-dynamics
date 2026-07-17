@@ -34,7 +34,7 @@ if __name__ == "__main__":
     with jax.default_device(jax.devices("cpu")[0]):
         X, C, F = simulate_two_subsystems_no_obs(3000, [4, 4], [3, 3], 50, seed=seed)
 
-        model = DecomposedAffineDynamics(num_operators=15, num_latents=8)
+        model = DecomposedLinearDynamics(num_operators=15, num_latents=8)
         operators = model.initialize_params(jr.key(seed))
         operators = fit_no_obs(X, model, operators, 200, 20, max_iter=200)
         plot_Fs(F)

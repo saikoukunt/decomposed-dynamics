@@ -3,8 +3,17 @@ from jax import Array, jit, value_and_grad, vmap
 from optax import l2_loss
 from tqdm import trange
 
-from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel, OperatorParams
-from decomposed_dynamics.inference import bpdn_inference, bpdn_inference_no_obs
+from decomposed_dynamics.dynamics_models import (
+    DecomposedDynamicsModel,
+    OperatorHyperparams,
+    OperatorParams,
+)
+from decomposed_dynamics.inference import (
+    InferenceHyperparams,
+    NoObsInferenceHyperparams,
+    bpdn_inference,
+    bpdn_inference_no_obs,
+)
 from decomposed_dynamics.observation_models import ObservationModel, ObservationParams
 from decomposed_dynamics.utils import extract_snippets
 
@@ -20,16 +29,16 @@ def fit(
     lr_init: float = 10.0,
     lr_decay: float = 0.9995,
     max_iter: int = 200,
-    operator_decorr_params: dict = {"operator_decorr_coeff": 0.05},
-    operator_prox_params: dict = {"l1_coeff": 0.05, "l1_reweight_coeff": 200},
-    inference_params: dict = {
-        "dynamics_loss_coeff": 0.5,
-        "l1_coeff": 0.2,
-        "smooth_coeff": 0.4,
-        "max_iter": 1000,
-        "tol": 1e-4,
-    },
+    operator_update_hyperparams: dict | OperatorHyperparams = {},
+    inference_hyperparams: dict | InferenceHyperparams = {},
 ) -> OperatorParams:
+    if type(operator_update_hyperparams) is dict:
+        operator_update_hyperparams = dynamics_model.initialize_hyperparams(
+            **operator_update_hyperparams
+        )
+
+    if type(inference_hyperparams) is dict:
+        inference_hyperparams = InferenceHyperparams(**inference_hyperparams)
 
     lr = lr_init
     progress_bar = trange(max_iter)
@@ -43,7 +52,7 @@ def fit(
             dynamics_model,
             operators,
             Y,
-            **inference_params,
+            **inference_hyperparams,
         )
 
         data_nll, data_nll_grads = data_nll_value_and_grad(Y, X, obs_model, obs_params)
@@ -59,8 +68,7 @@ def fit(
             operators,
             dynamics_recon_grads,
             lr,
-            operator_decorr_params,
-            operator_prox_params,
+            operator_update_hyperparams,
         )
 
         progress_bar.set_postfix_str(
@@ -74,7 +82,6 @@ def fit(
     return obs_params, operators
 
 
-# TODO: make data classes for params
 def fit_no_obs(
     data: Array,
     dynamics_model: DecomposedDynamicsModel,
@@ -84,15 +91,16 @@ def fit_no_obs(
     lr_init: float = 10.0,
     lr_decay: float = 0.9995,
     max_iter: int = 200,
-    operator_decorr_params: dict = {"operator_decorr_coeff": 0.0},
-    operator_prox_params: dict = {"l1_coeff": 0.05, "l1_reweight_coeff": 200},
-    inference_params: dict = {
-        "l1_coeff": 0.2,
-        "smooth_coeff": 0.4,
-        "max_iter": 1000,
-        "tol": 1e-4,
-    },
+    operator_update_hyperparams: dict | OperatorHyperparams = {},
+    inference_hyperparams: dict | NoObsInferenceHyperparams = {},
 ) -> OperatorParams:
+    if type(operator_update_hyperparams) is dict:
+        operator_update_hyperparams = dynamics_model.initialize_hyperparams(
+            **operator_update_hyperparams
+        )
+
+    if type(inference_hyperparams) is dict:
+        inference_hyperparams = NoObsInferenceHyperparams(**inference_hyperparams)
 
     lr = lr_init
     progress_bar = trange(max_iter)
@@ -100,7 +108,7 @@ def fit_no_obs(
     for i in progress_bar:
         X, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
-        C = bpdn_inference_no_obs(dynamics_model, operators, X, **inference_params)
+        C = bpdn_inference_no_obs(dynamics_model, operators, X, inference_hyperparams)
 
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
             X, C, dynamics_model, operators
@@ -110,8 +118,7 @@ def fit_no_obs(
             operators,
             dynamics_recon_grads,
             lr,
-            operator_decorr_params,
-            operator_prox_params,
+            operator_update_hyperparams,
         )
         progress_bar.set_postfix_str(
             f"Recon. Loss: {dynamics_recon_loss:.4f}, \U0001d6abop: {delta_operators}"
@@ -143,23 +150,20 @@ def update_obs_params(
     return updated_obs_params, delta_obs_params
 
 
-@jit
+@jit(static_argnames=["hyperparams"])
 def update_operators(
     dynamics_model: DecomposedDynamicsModel,
     operators: OperatorParams,
     grads,
     lr,
-    operator_decorr_params,
-    operator_prox_params,
+    hyperparams: OperatorHyperparams,
 ):
     updated_operators = jax.tree.map(
         lambda param, grad: param - lr * grad, operators, grads
     )
-    updated_operators = dynamics_model.decorrelate_operators(
-        updated_operators, **operator_decorr_params
-    )
-    updated_operators = dynamics_model.apply_prox(
-        updated_operators, **operator_prox_params
+
+    updated_operators = dynamics_model.regularize_operators(
+        updated_operators, hyperparams
     )
 
     delta_operators = jax.tree.map(

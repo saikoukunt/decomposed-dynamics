@@ -4,6 +4,7 @@ from decomposed_dynamics.dynamics_models.affine import (
 )
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    OperatorHyperparams,
     OperatorParams,
 )
 from decomposed_dynamics.dynamics_models.linear import (
