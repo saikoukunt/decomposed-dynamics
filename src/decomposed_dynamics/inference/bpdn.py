@@ -1,12 +1,13 @@
 import functools
 
+import equinox as eqx
 import jax.numpy as jnp
-from jax import Array, jit, lax, vmap
+from jax import Array, lax, vmap
 from jaxopt import ProximalGradient
 from jaxopt.prox import prox_non_negative_lasso
 from optax import l2_loss
 
-from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel, OperatorParams
+from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel
 from decomposed_dynamics.inference import (
     InferenceHyperparams,
     NoObsInferenceHyperparams,
@@ -15,12 +16,11 @@ from decomposed_dynamics.observation_models import ObservationModel, Observation
 from decomposed_dynamics.utils import _reweight_l1
 
 
-@jit(static_argnames=["hyperparams"])
+@eqx.filter_jit
 def bpdn_inference(
     obs_model: ObservationModel,
     obs_params: ObservationParams,
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     Y: Array,
     hyperparams: InferenceHyperparams,
 ):
@@ -29,7 +29,6 @@ def bpdn_inference(
         obs_model,
         obs_params,
         dynamics_model,
-        operators,
         hyperparams=hyperparams,
     )
     state = vmap(infer_one_trial)(Y)
@@ -40,12 +39,11 @@ def bpdn_inference(
     )
 
 
-@jit(static_argnames=["hyperparams"])
+@eqx.filter_jit
 def _bpdn_infer_one_trial(
     obs_model: ObservationModel,
     obs_params: ObservationParams,
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     Y: Array,
     hyperparams: InferenceHyperparams,
 ) -> Array:
@@ -59,7 +57,6 @@ def _bpdn_infer_one_trial(
     infer_one_timestep = functools.partial(
         _bpdn_infer_one_timestep,
         dynamics_model=dynamics_model,
-        operators=operators,
         solver=solver,
         hyperparams=hyperparams,
     )
@@ -76,20 +73,19 @@ def _bpdn_infer_one_trial(
     return state
 
 
-@jit(static_argnames=["solver", "hyperparams"])
+@eqx.filter_jit
 def _bpdn_infer_one_timestep(
     carry: tuple[Array, Array],
     y_t: Array,
     obs_model: ObservationModel,
     obs_params: ObservationParams,
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     solver: ProximalGradient,
     hyperparams: InferenceHyperparams,
 ) -> tuple[tuple[Array, Array, Array], Array]:
 
     x_tminus1, c_tminus1, is_first = carry
-    flows = dynamics_model.compute_operator_flows(operators, x_tminus1)
+    flows = dynamics_model.compute_operator_flows(x_tminus1)
     smooth_coeff = jnp.where(is_first, 0.0, hyperparams.smooth_coeff)
 
     l1_coeff = hyperparams.l1_coeff * jnp.ones(
@@ -135,7 +131,7 @@ def _bpdn_infer_one_timestep(
     ), state
 
 
-@jit
+@eqx.filter_jit
 def _bpdn_least_squares(
     state: Array,
     obs_model: ObservationModel,
@@ -162,10 +158,9 @@ def _bpdn_least_squares(
     return data_nll + dynamics_recon_loss + smooth_loss
 
 
-@jit(static_argnames=["hyperparams"])
+@eqx.filter_jit
 def bpdn_inference_no_obs(
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     X: Array,
     hyperparams: NoObsInferenceHyperparams,
 ) -> Array:
@@ -173,16 +168,14 @@ def bpdn_inference_no_obs(
     infer_one_trial = functools.partial(
         _bpdn_infer_one_no_obs_trial,
         dynamics_model,
-        operators,
         hyperparams=hyperparams,
     )
     return vmap(infer_one_trial)(X)
 
 
-@jit(static_argnames=["hyperparams"])
+@eqx.filter_jit
 def _bpdn_infer_one_no_obs_trial(
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     X: Array,
     hyperparams: NoObsInferenceHyperparams,
 ) -> Array:
@@ -195,7 +188,6 @@ def _bpdn_infer_one_no_obs_trial(
     infer_one_timestep = functools.partial(
         _bpdn_infer_one_no_obs_timestep,
         dynamics_model=dynamics_model,
-        operators=operators,
         solver=solver,
         hyperparams=hyperparams,
     )
@@ -208,19 +200,18 @@ def _bpdn_infer_one_no_obs_trial(
     return C
 
 
-@jit(static_argnames=["solver", "hyperparams"])
+@eqx.filter_jit
 def _bpdn_infer_one_no_obs_timestep(
     carry: tuple[Array, Array],
     xs: tuple[Array, Array],
     dynamics_model: DecomposedDynamicsModel,
-    operators: OperatorParams,
     solver: ProximalGradient,
     hyperparams: NoObsInferenceHyperparams,
 ) -> tuple[tuple[Array, Array], Array]:
 
     c_tminus1, is_first = carry
     x_tminus1, x_t = xs
-    flows = dynamics_model.compute_operator_flows(operators, x_tminus1)
+    flows = dynamics_model.compute_operator_flows(x_tminus1)
     smooth_coeff = jnp.where(is_first, 0.0, hyperparams.smooth_coeff)
 
     # solve vanilla L1
@@ -251,7 +242,7 @@ def _bpdn_infer_one_no_obs_timestep(
     return (c_t, jnp.bool_(False)), c_t
 
 
-@jit
+@eqx.filter_jit
 def _bpdn_no_obs_least_squares(
     c_t: Array,
     dynamics_model: DecomposedDynamicsModel,
