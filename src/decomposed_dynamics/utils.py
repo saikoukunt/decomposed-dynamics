@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit
@@ -93,3 +94,11 @@ def repackage_C_hat(C_hat, trial_ids):
             )
 
     return C_hat_repackaged
+
+
+def eqx_module_to_string(module):
+    str = ""
+    for path, val in jax.tree.leaves_with_path(module):
+        str += f", Avg \U0001d6ab{jax.tree_util.keystr(path)[1:]}: {val:.5f}"
+
+    return str
