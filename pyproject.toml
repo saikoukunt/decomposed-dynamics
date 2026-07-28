@@ -29,5 +29,6 @@ members = ["simulations"]
 dev = [
     "matplotlib>=3.10.9",
     "simulations",
+    "tornado>=6.5.7",
 ]
 

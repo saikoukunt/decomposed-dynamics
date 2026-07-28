@@ -15,5 +15,10 @@ build-backend = "uv_build"
 [tool.uv.sources]
 decomposed-dynamics = { workspace = true }
 
+[tool.basedpyright]
+venv = ".venv"
+venvPath = ".."
+typeCheckingMode = "basic"
+
 [dependency-groups]
 dev = []
