@@ -2,6 +2,7 @@ from typing import Callable
 
 import equinox as eqx
 import jax.numpy as jnp
+import jax.random as jr
 from jax import Array, jit
 from jax.nn import tanh
 
@@ -24,8 +25,8 @@ class RNN(eqx.Module):
         state_dim: int,
         input_dim: int,
         dt: float = 0.05,
-        W_rec: Array = None,
-        W_in: Array = None,
+        W_rec: Array | None = None,
+        W_in: Array | None = None,
         activation_fn: Callable = pos_tanh,
     ):
         self.state_dim = state_dim
@@ -44,21 +45,25 @@ class RNN(eqx.Module):
         return xdot
 
     @eqx.filter_jit
-    def euler_step(self, x: Array, input: Array, sigma: float) -> Array:
-        # TODO: add noise
-        return x + self.dt * self.compute_xdot(x, input)
+    def euler_step(self, x: Array, input: Array, sigma: float, key: Array) -> Array:
+        flow = self.dt * self.compute_xdot(x, input)
+        noise = sigma * jnp.sqrt(self.dt) * jr.normal(key, x.shape)
+
+        return x + flow + noise
 
     @eqx.filter_jit
     def euler_sequence(
-        self, x_0: Array, inputs: Array, sigma: float, num_iter: int
+        self, x_0: Array, inputs: Array, sigma: float, num_iter: int, seed: int
     ) -> Array:
-        # TODO:  handle constant input
-        # if len(inputs.shape == 1):
-        # inputs = jnp.ones()
+        if len(inputs.shape) == 1:
+            inputs = jnp.broadcast_to(inputs, (num_iter, inputs.shape[0]))
 
+        key = jr.key(seed)
         x = jnp.zeros((num_iter, self.state_dim))
         x[0, :] = x_0
+
         for i in range(num_iter):
-            x[i, :] = euler_step(x[i - 1, :], inputs[i, :])
+            key, subkey = jr.split(key)
+            x[i, :] = self.euler_step(x[i - 1, :], inputs[i, :], sigma, subkey)
 
         return x
