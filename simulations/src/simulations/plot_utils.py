@@ -32,8 +32,10 @@ def plot_nullclines(ax: Axes, model: RNN, x_min: float, x_max: float, **input_kw
     )
 
 
-def plot_trajectories(ax: Axes, model: RNN, x_0: Array, **kwargs):
-    trajectories = model.sample_trajectories(x_0, **kwargs)
+def plot_trajectories(
+    ax: Axes, model: RNN, num_trajectories: int, x_0: Array, **kwargs
+):
+    trajectories = model.sample_trajectories(x_0, num_trajectories, **kwargs)
 
     lc = LineCollection(trajectories, colors="green", linewidth=0.5, alpha=0.3)
     ax.add_collection(lc)

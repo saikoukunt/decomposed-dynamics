@@ -100,12 +100,12 @@ def main():
     plot_trajectories(
         ax,
         model,
-        jnp.array([0, 0]),
+        args.num_trajectories,
+        jnp.array([0.0, 0.0]),
         dt=args.dt,
         T=args.T,
         sigma=args.sigma,
         seed=args.seed,
-        num_trajectories=args.num_trajectories,
         coherence=args.coherence,
         mu_0=args.mu0,
     )
