@@ -37,26 +37,39 @@ class RNN(eqx.Module):
         self.activation_fn = activation_fn
 
     @eqx.filter_jit
-    def compute_xdot(self, x: Array, input: Array) -> Array:
+    def compute_xdot_from_inputs(self, x: Array, input: Array) -> Array:
         rec_current = jnp.einsum("ij, ...j -> ...i", self.W_rec, x)
         input_current = jnp.einsum("im, ...m -> ...i", self.W_in, input)
         xdot = -x + self.activation_fn(rec_current + input_current)
 
         return xdot
 
+    def compute_input_activations(self, inputs: Array) -> Array:
+        """Subclasses should override this function with their own kwargs"""
+        return inputs
+
+    def compute_xdot(self, x: Array, **input_kwargs) -> Array:
+        inputs = self.compute_input_activations(**input_kwargs)
+
+        return self.compute_xdot_from_inputs(x, inputs)
+
     @eqx.filter_jit
-    def euler_step(self, x: Array, input: Array, sigma: float, key: Array) -> Array:
-        flow = self.dt * self.compute_xdot(x, input)
+    def euler_step(
+        self,
+        x: Array,
+        sigma: float,
+        key: Array,
+        **input_kwargs,
+    ) -> Array:
+        flow = self.dt * self.compute_xdot(x, **input_kwargs)
         noise = sigma * jnp.sqrt(self.dt) * jr.normal(key, x.shape)
 
         return x + flow + noise
 
     @eqx.filter_jit
-    def euler_sequence(
-        self, x_0: Array, inputs: Array, sigma: float, num_iter: int, seed: int
+    def euler_trajectory(
+        self, x_0: Array, sigma: float, num_iter: int, seed: int, **input_kwargs
     ) -> Array:
-        if len(inputs.shape) == 1:
-            inputs = jnp.broadcast_to(inputs, (num_iter, inputs.shape[0]))
 
         key = jr.key(seed)
         x = jnp.zeros((num_iter, self.state_dim))
@@ -64,6 +77,6 @@ class RNN(eqx.Module):
 
         for i in range(num_iter):
             key, subkey = jr.split(key)
-            x[i, :] = self.euler_step(x[i - 1, :], inputs[i, :], sigma, subkey)
+            x[i, :] = self.euler_step(x[i - 1, :], sigma, subkey, **input_kwargs)
 
         return x

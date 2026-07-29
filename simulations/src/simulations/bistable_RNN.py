@@ -13,6 +13,7 @@ class bistable_RNN(RNN):
         self,
         W_exc: float,
         W_inhib: float,
+        W_input: float = 0.01,
         dt: float = 0.05,
         activation_fn: Callable = pos_tanh,
     ):
@@ -23,25 +24,31 @@ class bistable_RNN(RNN):
         W_rec[1, 0] = -W_inhib
 
         W_in = np.zeros((2, 2))
-        W_in[0, 0] = 1
-        W_in[1, 0] = -1
+        W_in[0, 0] = W_input
+        W_in[1, 0] = -W_input
         W_in[:, 1] = 1
 
         super().__init__(2, 2, dt, jnp.array(W_rec), jnp.array(W_in), activation_fn)
 
+    def compute_input_activations(self, coherence: float, mu_0: float) -> Array:
+        inputs = jnp.zeros((2))
+        inputs = inputs.at[0].set(coherence)
+        inputs = inputs.at[1].set(mu_0)
+
+        return inputs
+
     def sample_trajectory(
         self,
-        x_0,
+        x_0: Array,
         coherence: float,
-        E: float,
+        mu_0: float,
         sigma: float,
         T: int,
         dt: float,
         seed: int,
     ) -> Array:
         num_iter = floor(T / dt)
-        inputs = np.zeros((num_iter, 2))
-        inputs[:, 0] = E
-        inputs[:, 1] = coherence
 
-        return self.euler_sequence(x_0, jnp.array(inputs), sigma, num_iter, seed)
+        return self.euler_trajectory(
+            x_0, sigma, num_iter, seed, coherence=coherence, mu_0=mu_0
+        )
