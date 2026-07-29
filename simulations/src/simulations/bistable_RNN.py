@@ -36,19 +36,3 @@ class bistable_RNN(RNN):
         inputs = inputs.at[1].set(mu_0)
 
         return inputs
-
-    def sample_trajectory(
-        self,
-        x_0: Array,
-        coherence: float,
-        mu_0: float,
-        sigma: float,
-        T: int,
-        dt: float,
-        seed: int,
-    ) -> Array:
-        num_iter = floor(T / dt)
-
-        return self.euler_trajectory(
-            x_0, sigma, num_iter, seed, coherence=coherence, mu_0=mu_0
-        )

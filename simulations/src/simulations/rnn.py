@@ -1,10 +1,13 @@
+from math import floor
 from typing import Callable
 
 import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 from jax import Array, jit
 from jax.nn import tanh
+from numpy.typing import NDArray
 
 
 @jit
@@ -66,17 +69,36 @@ class RNN(eqx.Module):
 
         return x + flow + noise
 
-    @eqx.filter_jit
     def euler_trajectory(
         self, x_0: Array, sigma: float, num_iter: int, seed: int, **input_kwargs
     ) -> Array:
 
         key = jr.key(seed)
         x = jnp.zeros((num_iter, self.state_dim))
-        x[0, :] = x_0
+        x = x.at[0, :].set(x_0)
 
         for i in range(num_iter):
             key, subkey = jr.split(key)
-            x[i, :] = self.euler_step(x[i - 1, :], sigma, subkey, **input_kwargs)
+            x = x.at[i, :].set(self.euler_step(x[i - 1, :], sigma, subkey, **input_kwargs))
 
         return x
+
+    def sample_trajectories(
+        self,
+        x_0: Array,
+        sigma: float,
+        T: float,
+        dt: float,
+        seed: int,
+        num_trajectories: int,
+        **input_kwargs,
+    ) -> NDArray:
+        num_iter = floor(T / dt)
+        trajectories = np.zeros((num_trajectories, num_iter, x_0.shape[0]))
+
+        for i in range(num_trajectories):
+            trajectories[i] = self.euler_trajectory(
+                x_0, sigma, num_iter, seed + i, **input_kwargs
+            )
+
+        return trajectories

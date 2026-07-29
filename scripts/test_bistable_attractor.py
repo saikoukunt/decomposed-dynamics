@@ -1,3 +1,4 @@
+import jax.numpy as jnp
 import matplotlib
 
 matplotlib.use("WebAgg")
@@ -5,7 +6,7 @@ import argparse
 import sys
 
 import matplotlib.pyplot as plt
-from simulations.plot_utils import plot_flow_field
+from simulations.plot_utils import plot_flow_field, plot_nullclines, plot_trajectories
 
 from simulations import bistable_RNN
 
@@ -30,7 +31,10 @@ def parse_args(argv: list):
         help="excitation current when stimulus is presented",
     )
     parser.add_argument(
-        "--w_exc", default=0.0, type=float, help="strength of recurrent self-excitation"
+        "--w_exc",
+        default=0.0,
+        type=float,
+        help="strength of recurrent self-excitation",
     )
     parser.add_argument(
         "--w_inhib",
@@ -39,10 +43,40 @@ def parse_args(argv: list):
         help="strength of recurrent mutual inhibition",
     )
     parser.add_argument(
-        "--w_input", default=0.01, type=float, help="coefficient of coherence input"
+        "--w_input",
+        default=0.01,
+        type=float,
+        help="coefficient of coherence input",
     )
     parser.add_argument(
-        "--dt", default=0.05, type=float, help="time step in Euler approximation"
+        "--dt",
+        default=0.05,
+        type=float,
+        help="time step in seconds for Euler approximation",
+    )
+    parser.add_argument(
+        "--sigma",
+        default=0.1,
+        type=float,
+        help="white noise variance",
+    )
+    parser.add_argument(
+        "--T",
+        default=7.5,
+        type=float,
+        help="duration of sampled trajectories in seconds",
+    )
+    parser.add_argument(
+        "--num_trajectories",
+        default=100,
+        type=int,
+        help="number of trajectories to sample",
+    )
+    parser.add_argument(
+        "--seed",
+        default=0,
+        type=int,
+        help="random seed",
     )
 
     if "-h" in argv or "--help" in argv:
@@ -60,7 +94,25 @@ def main():
     model = bistable_RNN(
         W_exc=args.w_exc, W_inhib=args.w_inhib, W_input=args.w_input, dt=args.dt
     )
-    plot_flow_field(model, 0, 1, 0.05, coherence=args.coherence, mu_0=args.mu0)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    plot_flow_field(ax, model, 0, 1, 0.05, coherence=args.coherence, mu_0=args.mu0)
+    plot_trajectories(
+        ax,
+        model,
+        jnp.array([0, 0]),
+        dt=args.dt,
+        T=args.T,
+        sigma=args.sigma,
+        seed=args.seed,
+        num_trajectories=args.num_trajectories,
+        coherence=args.coherence,
+        mu_0=args.mu0,
+    )
+    plot_nullclines(ax, model, 0, 1, coherence=args.coherence, mu_0=args.mu0)
+    ax.set_xlim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend()
     plt.show()
 
 
