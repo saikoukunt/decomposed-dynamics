@@ -18,8 +18,6 @@ def plot_nullclines(ax: Axes, model: RNN, x_min: float, x_max: float, **input_kw
         flows[:, :, 0],
         levels=[0],
         colors="blue",
-        linewidth=1,
-        label="x nullcline",
     )
     ax.contour(
         grid[:, :, 0],
@@ -27,8 +25,6 @@ def plot_nullclines(ax: Axes, model: RNN, x_min: float, x_max: float, **input_kw
         flows[:, :, 1],
         levels=[0],
         colors="red",
-        linewidth=1,
-        label="y nullcline",
     )
 
 
@@ -61,3 +57,5 @@ def plot_flow_field(
 
     grid, arrows = compute_flow_field(model, start, stop, step, **input_kwargs)
     ax.quiver(grid[:, 0], grid[:, 1], arrows[:, 0], arrows[:, 1], color="darkgrey")
+
+    return grid, arrows

@@ -13,8 +13,8 @@ from numpy.typing import NDArray
 
 
 @jit
-def pos_tanh(input: Array):
-    return 0.5 + 0.5 * tanh(input)
+def pos_tanh(x: Array):
+    return 0.5 + 0.5 * tanh(x)
 
 
 class RNN(eqx.Module):

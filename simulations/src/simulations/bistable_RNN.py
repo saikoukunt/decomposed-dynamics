@@ -1,4 +1,3 @@
-from math import floor
 from typing import Callable
 
 import jax.numpy as jnp
