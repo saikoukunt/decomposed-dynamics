@@ -20,7 +20,7 @@ class DecomposedDynamicsModel(eqx.Module):
         self.initialize_params(key, **init_kwargs)
 
     @abstractmethod
-    def initialize_params(self, key: Array, **kwargs) -> Self:
+    def initialize_params(self, key: Array, **kwargs):
         raise NotImplementedError
 
     @staticmethod
