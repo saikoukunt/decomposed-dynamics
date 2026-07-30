@@ -19,7 +19,7 @@ from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
 
 def fit(
-    data: Array,
+    data: dict,
     observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
     samples_per_snippet: int,
@@ -50,14 +50,14 @@ def fit(
             observation_model,
             dynamics_model,
             observations,
-            **inference_hyperparams,
+            inference_hyperparams,
         )
 
         data_nll, data_nll_grads = data_nll_value_and_grad(
-            observations, latents, observation_model
+            observation_model, observations, latents
         )
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
-            latents, operator_coeffs, dynamics_model
+            dynamics_model, latents, operator_coeffs
         )
 
         updated_obs_model, delta_obs_model = update_observation_model(
@@ -83,7 +83,7 @@ def fit(
 
 
 def fit_no_obs(
-    data: Array,
+    data: dict,
     dynamics_model: DecomposedDynamicsModel,
     samples_per_snippet: int,
     num_snippets: int,

@@ -53,6 +53,7 @@ def _bpdn_infer_one_trial(
 
     infer_one_timestep = functools.partial(
         _bpdn_infer_one_timestep,
+        observation_model=observation_model,
         dynamics_model=dynamics_model,
         solver=solver,
         hyperparams=hyperparams,
@@ -60,8 +61,7 @@ def _bpdn_infer_one_trial(
     _, state = lax.scan(
         infer_one_timestep,
         (
-            jnp.zeros(dynamics_model.num_latents),
-            jnp.zeros(dynamics_model.num_operators),
+            jnp.zeros(dynamics_model.num_latents + dynamics_model.num_operators),
             jnp.bool_(True),
         ),
         observations,
@@ -78,7 +78,7 @@ def _bpdn_infer_one_timestep(
     dynamics_model: DecomposedDynamicsModel,
     solver: ProximalGradient,
     hyperparams: InferenceHyperparams,
-) -> tuple[tuple[Array, Array, Array], Array]:
+) -> tuple[tuple[Array, Array], Array]:
 
     state, is_first = carry
     x_tminus1 = state[: dynamics_model.num_latents]
@@ -92,7 +92,7 @@ def _bpdn_infer_one_timestep(
     l1_coeff[: dynamics_model.num_latents] = 0
 
     # solve vanilla L1
-    state = solver.run(
+    state, _ = solver.run(
         jnp.zeros(dynamics_model.num_latents + dynamics_model.num_operators),
         hyperparams_prox=l1_coeff,
         obs_model=observation_model,
@@ -106,7 +106,7 @@ def _bpdn_infer_one_timestep(
     )
 
     # solve reweighted L1 using previous as warm start
-    state = solver.run(
+    state, _ = solver.run(
         state,
         hyperparams_prox=_reweight_l1(state, l1_coeff, hyperparams.l1_reweight_coeff),
         obs_model=observation_model,
