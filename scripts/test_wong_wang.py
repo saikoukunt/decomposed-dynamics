@@ -4,9 +4,15 @@ import sys
 import jax.numpy as jnp
 import matplotlib
 import matplotlib.pyplot as plt
-from simulations.plot_utils import plot_flow_field, plot_nullclines, plot_trajectories
+from simulations.plot_utils import (
+    compute_flow_field,
+    plot_flow_field,
+    plot_nullclines,
+    plot_speed,
+    plot_trajectories,
+)
 
-from simulations import wong_and_wang_RNN
+from simulations import WongWangRNN
 
 
 def parse_args(argv: list):
@@ -46,6 +52,7 @@ def parse_args(argv: list):
         help="duration of sampled trajectories in seconds",
     )
     parser.add_argument(
+        "-n",
         "--num_trajectories",
         default=100,
         type=int,
@@ -70,7 +77,7 @@ def main():
     if args is None:
         return
 
-    model = wong_and_wang_RNN()
+    model = WongWangRNN()
     fig, ax = plt.subplots(figsize=(6, 6))
     grid, arrows = plot_flow_field(
         ax, model, 0, 0.8, 0.05, coherence=args.coherence, mu_0=args.mu0
@@ -88,7 +95,12 @@ def main():
         mu_0=args.mu0,
     )
 
-    plot_nullclines(ax, model, 0, 1, coherence=args.coherence, mu_0=args.mu0)
+    grid, flows, axes = compute_flow_field(
+        model, 0, 1, 1 / 100, coherence=args.coherence, mu_0=args.mu0
+    )
+    plot_speed(ax, grid, flows, vmin=0, vmax=1.0)
+    plot_nullclines(ax, grid, flows)
+
     ax.set_xlim(-0.05, 0.85)
     ax.set_ylim(-0.05, 0.85)
     plt.show()

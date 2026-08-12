@@ -1,6 +1,7 @@
 import functools
+from abc import abstractmethod
 from math import floor
-from typing import Callable
+from typing import Callable, override
 
 import equinox as eqx
 import jax
@@ -11,13 +12,15 @@ from jax import Array, jit, vmap
 from jax.nn import tanh
 from numpy.typing import NDArray
 
+from .differential_equation import DifferentialEquation
+
 
 @jit
 def pos_tanh(x: Array):
     return 0.5 + 0.5 * tanh(x)
 
 
-class RNN(eqx.Module):
+class RNN(DifferentialEquation):
     state_dim: int
     input_dim: int
     dt: float
@@ -53,52 +56,8 @@ class RNN(eqx.Module):
         """Subclasses should override this function with their own kwargs"""
         return inputs
 
+    @override
     def compute_xdot(self, x: Array, **input_kwargs) -> Array:
         inputs = self.compute_input_activations(**input_kwargs)
 
         return self.compute_xdot_from_inputs(x, inputs)
-
-    @eqx.filter_jit
-    def euler_step(
-        self,
-        x: Array,
-        key: Array,
-        sigma: float,
-        **input_kwargs,
-    ) -> tuple[Array, Array]:
-        flow = self.dt * self.compute_xdot(x, **input_kwargs)
-        noise = sigma * jnp.sqrt(self.dt) * jr.normal(key, x.shape)
-
-        return x + flow + noise, x + flow + noise
-
-    @eqx.filter_jit
-    def euler_trajectory(
-        self, x_0: Array, sigma: float, num_iter: int, seed: int, **input_kwargs
-    ) -> Array:
-
-        key = jr.key(seed)
-        keys = jr.split(key, num_iter)
-
-        euler_step = functools.partial(self.euler_step, sigma=sigma, **input_kwargs)
-        _, x = jax.lax.scan(euler_step, init=x_0, xs=keys)
-
-        return x
-
-    def sample_trajectories(
-        self,
-        x_0: Array,
-        num_trajectories: int,
-        sigma: float,
-        T: float,
-        dt: float,
-        seed: int,
-        **input_kwargs,
-    ) -> NDArray:
-        num_iter = floor(T / dt)
-        seeds = seed + np.arange(num_trajectories)
-        single_trajectory = functools.partial(
-            self.euler_trajectory, x_0, sigma, num_iter, **input_kwargs
-        )
-        trajectories = vmap(single_trajectory)(seeds)
-
-        return np.array(trajectories)

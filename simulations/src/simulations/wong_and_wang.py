@@ -15,7 +15,7 @@ def wong_and_wang_activation(
     return (a * x - b) / (1 - jnp.exp(-d * (a * x - b)))
 
 
-class wong_and_wang_RNN(RNN):
+class WongWangRNN(RNN):
     tau_s: float
     gamma: float
 

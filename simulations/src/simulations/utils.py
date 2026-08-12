@@ -56,3 +56,17 @@ def generate_switching_c(
         t = end_time
 
     return jnp.array(C)
+
+
+def cartesian_to_polar(coords):
+    x = coords[..., 0]
+    y = coords[..., 1]
+
+    return jnp.sqrt(x**2 + y**2), jnp.arctan2(y, x)
+
+
+def polar_to_cartesian(coords):
+    r = coords[..., 0]
+    theta = coords[..., 1]
+
+    return r * jnp.cos(theta), r * jnp.sin(theta)

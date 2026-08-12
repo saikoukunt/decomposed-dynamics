@@ -1,17 +1,35 @@
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from numpy.typing import NDArray
 
-from .rnn import RNN
+from .differential_equation import DifferentialEquation
 
 
-def plot_nullclines(ax: Axes, model: RNN, x_min: float, x_max: float, **input_kwargs):
-    grid, flows = compute_flow_field(
-        model, x_min, x_max, (x_max - x_min) / 100, **input_kwargs
+def plot_speed(ax: Axes, grid: NDArray, flows: NDArray, **plot_kwargs):
+    speed = np.sqrt(flows[:, :, 0] ** 2 + flows[:, :, 1] ** 2)
+    xmin = grid[:, :, 0].min()
+    xmax = grid[:, :, 0].max()
+    ymin = grid[:, :, 1].min()
+    ymax = grid[:, :, 1].max()
+
+    im = ax.imshow(
+        speed,
+        extent=(xmin, xmax, ymin, ymax),
+        origin="lower",
+        cmap="YlGn_r",
+        **plot_kwargs,
     )
-    grid = grid.reshape(101, 101, model.state_dim)
-    flows = flows.reshape(101, 101, model.state_dim)
+    ax.figure.colorbar(im, ax=ax)
+
+
+def plot_nullclines(
+    ax: Axes,
+    grid: NDArray,
+    flows: NDArray,
+):
     ax.contour(
         grid[:, :, 0],
         grid[:, :, 1],
@@ -29,33 +47,48 @@ def plot_nullclines(ax: Axes, model: RNN, x_min: float, x_max: float, **input_kw
 
 
 def plot_trajectories(
-    ax: Axes, model: RNN, num_trajectories: int, x_0: Array, **kwargs
+    ax: Axes, model: DifferentialEquation, num_trajectories: int, x_0: Array, **kwargs
 ):
     trajectories = model.sample_trajectories(x_0, num_trajectories, **kwargs)
 
-    lc = LineCollection(trajectories, colors="green", linewidth=0.5, alpha=0.3)
+    lc = LineCollection(trajectories, colors="black", linewidth=0.7, alpha=0.7)
     ax.add_collection(lc)
-    ax.scatter(trajectories[:, -1, 0], trajectories[:, -1, 1], c="green", s=3)
+    ax.scatter(trajectories[:, -1, 0], trajectories[:, -1, 1], c="k", s=10, alpha=0.5)
 
 
 def compute_flow_field(
-    model: RNN, start: float, stop: float, step: float, **input_kwargs
+    model: DifferentialEquation, start: float, stop: float, step: float, **input_kwargs
 ):
     axis = jnp.arange(start, stop + step, step)
     grid = jnp.meshgrid(*([axis] * model.state_dim))
-    grid = jnp.array([axis.flatten() for axis in grid]).T
-    flows = model.compute_xdot(grid, **input_kwargs)
+    flat_grid = jnp.array([axis.flatten() for axis in grid]).T
+    flows = model.compute_xdot(flat_grid, **input_kwargs)
 
-    return grid, flows
+    flows = flows.reshape(axis.shape[0], axis.shape[0], model.state_dim)
+
+    return np.array(grid).transpose(1, 2, 0), np.array(flows), np.array(axis)
 
 
 def plot_flow_field(
-    ax: Axes, model: RNN, start: float, stop: float, step: float, **input_kwargs
+    ax: Axes,
+    model: DifferentialEquation,
+    start: float,
+    stop: float,
+    step: float,
+    **input_kwargs,
 ):
     if model.state_dim > 3:
         raise RuntimeError("Can't plot flow fields in more than 3 dimensions!")
 
-    grid, arrows = compute_flow_field(model, start, stop, step, **input_kwargs)
-    ax.quiver(grid[:, 0], grid[:, 1], arrows[:, 0], arrows[:, 1], color="darkgrey")
+    grid, flows, axes = compute_flow_field(model, start, stop, step, **input_kwargs)
+    ax.streamplot(
+        axes,
+        axes,
+        flows[:, :, 0],
+        flows[:, :, 1],
+        density=1,
+        color="grey",
+        linewidth=1,
+    )
 
-    return grid, arrows
+    return grid, flows
