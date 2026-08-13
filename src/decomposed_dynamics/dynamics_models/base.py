@@ -36,7 +36,17 @@ class DecomposedDynamicsModel(eqx.Module):
     def regularize_operators(self, **kwargs) -> Self:
         raise NotImplementedError
 
-    @staticmethod
     @jit
-    def predict_next_state(c: Array, flows: Array) -> Array:
+    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
         return jnp.einsum("...k, ...ki -> ...i", c, flows)
+
+
+class DeltaDynamics(eqx.Module):
+    dt: float
+
+    def __init__(self, dt):
+        self.dt = dt
+
+    @jit
+    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
+        return x + self.dt * jnp.einsum("...k, ...ki -> ...i", c, flows)

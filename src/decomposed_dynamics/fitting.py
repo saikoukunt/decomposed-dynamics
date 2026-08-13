@@ -188,7 +188,9 @@ def compute_dynamics_recon_loss_sequence(
     operator_coeffs: Array,
 ):
     flows = dynamics_model.compute_operator_flows(latents[:-1, :])
-    predictions = dynamics_model.predict_next_state(operator_coeffs, flows)
+    predictions = dynamics_model.predict_next_state(
+        latents[:-1, :], operator_coeffs, flows
+    )
 
     return l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
 

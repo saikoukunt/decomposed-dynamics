@@ -8,6 +8,7 @@ from jax import Array, grad
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
     OperatorHyperparams,
 )
 from decomposed_dynamics.utils import (
@@ -21,11 +22,14 @@ from decomposed_dynamics.utils import (
 class LinearOperatorHyperparams(OperatorHyperparams):
     l1_coeff: float = 0.03
     l1_reweight_coeff: float = 200
-    decorr_coeff: float = 0.01
+    decorr_coeff: float = 0.0
 
 
 class DecomposedLinearDynamics(DecomposedDynamicsModel):
     F: Array
+
+    def __init__(self, num_operators: int, num_latents: int, key: Array, **init_kwargs):
+        super().__init__(num_operators, num_latents, key)
 
     def initialize_params(self, key: Array):
         F = jr.normal(key, (self.num_operators, self.num_latents, self.num_latents))
@@ -65,3 +69,11 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
         F = F - operator_decorr_coeff * decorr_gradient
 
         return F
+
+
+class DecomposedLinearDeltaDynamics(DeltaDynamics, DecomposedLinearDynamics):
+    def __init__(
+        self, num_operators: int, num_latents: int, key: Array, dt: float, **init_kwargs
+    ):
+        super().__init__(dt)
+        super(DecomposedLinearDynamics, self).__init__(num_operators, num_latents, key)
