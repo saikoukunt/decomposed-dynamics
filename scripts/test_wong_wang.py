@@ -9,7 +9,7 @@ from simulations.plot_utils import (
     plot_flow_field,
     plot_nullclines,
     plot_speed,
-    plot_trajectories,
+    sample_and_plot_trajectories,
 )
 
 from simulations import WongWangRNN
@@ -82,11 +82,11 @@ def main():
     grid, arrows = plot_flow_field(
         ax, model, 0, 0.8, 0.05, coherence=args.coherence, mu_0=args.mu0
     )
-    plot_trajectories(
+    sample_and_plot_trajectories(
         ax,
         model,
         args.num_trajectories,
-        jnp.array([0.0, 0.0]),
+        jnp.zeros((args.num_trajectories, 2)),
         dt=args.dt,
         T=args.T,
         sigma=args.sigma,

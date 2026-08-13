@@ -44,7 +44,7 @@ class DifferentialEquation(eqx.Module):
 
     @eqx.filter_jit
     def euler_trajectory(
-        self, x_0: Array, sigma: float, num_iter: int, seed: int, **input_kwargs
+        self, x_0: Array, seed: int, sigma: float, num_iter: int, **input_kwargs
     ) -> Array:
 
         key = jr.key(seed)
@@ -55,6 +55,7 @@ class DifferentialEquation(eqx.Module):
 
         return x
 
+    @eqx.filter_jit
     def sample_trajectories(
         self,
         x_0: Array,
@@ -64,12 +65,14 @@ class DifferentialEquation(eqx.Module):
         dt: float,
         seed: int,
         **input_kwargs,
-    ) -> NDArray:
+    ) -> Array:
         num_iter = floor(T / dt)
-        seeds = seed + np.arange(num_trajectories)
+        seeds = seed + jnp.arange(num_trajectories)
         single_trajectory = functools.partial(
-            self.euler_trajectory, x_0, sigma, num_iter, **input_kwargs
+            self.euler_trajectory, sigma=sigma, num_iter=num_iter, **input_kwargs
         )
-        trajectories = vmap(single_trajectory)(seeds)
+        trajectories = vmap(single_trajectory)(x_0, seeds)
 
-        return np.array(trajectories)
+        return jnp.concat(
+            (jnp.expand_dims(x_0, axis=1), jnp.array(trajectories)), axis=1
+        )

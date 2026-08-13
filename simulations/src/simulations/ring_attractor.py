@@ -18,4 +18,4 @@ class RingAttractorSimulation(DifferentialEquation):
         radial_flow = -r * (2 * r - 1) * (r - 1)
         x_dot, y_dot = polar_to_cartesian(jnp.vstack((radial_flow, theta)).T)
 
-        return jnp.array([x_dot, y_dot]).T
+        return jnp.squeeze(jnp.array([x_dot, y_dot]).T)

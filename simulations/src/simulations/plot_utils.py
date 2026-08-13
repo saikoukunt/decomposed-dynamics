@@ -46,12 +46,16 @@ def plot_nullclines(
     )
 
 
-def plot_trajectories(
+def sample_and_plot_trajectories(
     ax: Axes, model: DifferentialEquation, num_trajectories: int, x_0: Array, **kwargs
 ):
     trajectories = model.sample_trajectories(x_0, num_trajectories, **kwargs)
 
-    lc = LineCollection(trajectories, colors="black", linewidth=0.7, alpha=0.7)
+    plot_trajectories(ax, trajectories)
+
+
+def plot_trajectories(ax: Axes, trajectories: Array):
+    lc = LineCollection(trajectories, colors="black", linewidth=1, alpha=0.7)
     ax.add_collection(lc)
     ax.scatter(trajectories[:, -1, 0], trajectories[:, -1, 1], c="k", s=10, alpha=0.5)
 
