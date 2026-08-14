@@ -130,7 +130,7 @@ def main():
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
     model = DecomposedLinearDynamics(num_operators=6, num_latents=2, key=keys[3])
 
-    inference_hyperparams = NoObsInferenceHyperparams()
+    inference_hyperparams = NoObsInferenceHyperparams(l1_coeff=0.7)
     model = fit_no_obs(
         trajectory_dict,
         model,
@@ -139,6 +139,7 @@ def main():
         max_iter=100,
         lr_init=1,
         inference_hyperparams=inference_hyperparams,
+        model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.01),
     )
     C = bpdn_inference_no_obs(model, trajectories, inference_hyperparams)
 
@@ -196,6 +197,9 @@ def main():
 
     plt.tight_layout()
     plt.show()
+
+    jnp.save("./coeffs.npy", coeffs[:, 2])
+    jnp.save("./coords.npy", coords)
 
 
 if __name__ == "__main__":
