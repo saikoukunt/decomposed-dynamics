@@ -13,7 +13,7 @@ def plot_Fs(F, vmin=None, vmax=None):
     if vmax is None:
         vmax = max_absolute_value
 
-    plt.figure(figsize=(num_cols, num_rows))
+    plt.figure(figsize=(1.5 * num_cols, 1.5 * num_rows))
 
     for i in range(F.shape[0]):
         plt.subplot(num_rows, num_cols, i + 1)

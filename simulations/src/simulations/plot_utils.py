@@ -56,8 +56,25 @@ def sample_and_plot_trajectories(
 
 def plot_trajectories(ax: Axes, trajectories: Array):
     lc = LineCollection(trajectories, colors="black", linewidth=1, alpha=0.7)
+    ax.scatter(
+        trajectories[:, 0, 0],
+        trajectories[:, 0, 1],
+        c="r",
+        marker="x",
+        s=10,
+        alpha=0.5,
+        label="start",
+    )
     ax.add_collection(lc)
-    ax.scatter(trajectories[:, -1, 0], trajectories[:, -1, 1], c="k", s=10, alpha=0.5)
+    ax.scatter(
+        trajectories[:, -1, 0],
+        trajectories[:, -1, 1],
+        c="k",
+        s=10,
+        alpha=0.5,
+        label="end",
+    )
+    ax.legend()
 
 
 def compute_flow_field(

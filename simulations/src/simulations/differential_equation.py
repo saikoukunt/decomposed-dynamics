@@ -16,14 +16,12 @@ from numpy.typing import NDArray
 class DifferentialEquation(eqx.Module):
     state_dim: int
     dt: float
+    tau: float
 
-    def __init__(
-        self,
-        state_dim: int,
-        dt: float = 0.05,
-    ):
+    def __init__(self, state_dim: int, dt: float, tau: float):
         self.state_dim = state_dim
         self.dt = dt
+        self.tau = tau
 
     @abstractmethod
     def compute_xdot(self, x: Array, **input_kwargs) -> Array:
@@ -37,7 +35,7 @@ class DifferentialEquation(eqx.Module):
         sigma: float,
         **input_kwargs,
     ) -> tuple[Array, Array]:
-        flow = self.dt * self.compute_xdot(x, **input_kwargs)
+        flow = self.dt / self.tau * self.compute_xdot(x, **input_kwargs)
         noise = sigma * jnp.sqrt(self.dt) * jr.normal(key, x.shape)
 
         return x + flow + noise, x + flow + noise

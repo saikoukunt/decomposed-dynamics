@@ -22,7 +22,7 @@ from decomposed_dynamics.utils import (
 class LinearOperatorHyperparams(OperatorHyperparams):
     l1_coeff: float = 0.03
     l1_reweight_coeff: float = 200
-    decorr_coeff: float = 0.0
+    decorr_coeff: float = 0.008
 
 
 class DecomposedLinearDynamics(DecomposedDynamicsModel):
