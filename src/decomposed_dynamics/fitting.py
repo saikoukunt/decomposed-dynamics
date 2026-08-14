@@ -1,5 +1,6 @@
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 from jax import Array, vmap
 from optax import l2_loss
 from tqdm import trange
@@ -188,9 +189,19 @@ def compute_dynamics_recon_loss_sequence(
     operator_coeffs: Array,
 ):
     flows = dynamics_model.compute_operator_flows(latents[:-1, :])
-    predictions = dynamics_model.predict_next_state(operator_coeffs, flows)
+    predictions = dynamics_model.predict_next_state(
+        latents[:-1, :], operator_coeffs, flows
+    )
+    mse = l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
 
-    return l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
+    null_predictions = dynamics_model.predict_next_state(
+        latents[:-1, :], jnp.zeros_like(operator_coeffs), flows
+    )
+    variance = jnp.maximum(
+        l2_loss(null_predictions, latents[1:, :]).sum(axis=-1).mean(), 1e-3
+    )
+
+    return mse / variance
 
 
 dynamics_recon_value_and_grad = eqx.filter_jit(

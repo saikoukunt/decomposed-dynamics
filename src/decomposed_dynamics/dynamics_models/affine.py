@@ -9,6 +9,7 @@ from jaxopt.prox import prox_lasso
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
 )
 from decomposed_dynamics.dynamics_models.linear import LinearOperatorHyperparams
 from decomposed_dynamics.utils import (
@@ -80,3 +81,11 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         F = F - operator_decorr_coeff * decorr_gradient
 
         return F
+
+
+class DecomposedAffineDeltaDynamics(DeltaDynamics, DecomposedAffineDynamics):
+    def __init__(
+        self, num_operators: int, num_latents: int, key: Array, dt: float, **init_kwargs
+    ):
+        super().__init__(dt)
+        super(DecomposedAffineDynamics, self).__init__(num_operators, num_latents, key)

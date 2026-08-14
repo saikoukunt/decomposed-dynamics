@@ -3,7 +3,10 @@ name = "simulations"
 version = "0.1.0"
 description = "Simulations for decomposed dynamical systems"
 requires-python = ">=3.12"
-dependencies = ["decomposed-dynamics"]
+dependencies = [
+    "decomposed-dynamics",
+    "jax>=0.10.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]
@@ -11,6 +14,11 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 decomposed-dynamics = { workspace = true }
+
+[tool.basedpyright]
+venv = ".venv"
+venvPath = ".."
+typeCheckingMode = "basic"
 
 [dependency-groups]
 dev = []
