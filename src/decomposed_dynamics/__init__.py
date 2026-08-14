@@ -1,1 +1,1 @@
-from .extract_snippets import extract_snippets
+from .utils import extract_snippets

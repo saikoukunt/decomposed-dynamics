@@ -110,8 +110,6 @@ def plot_Cs_random_trials(C, num_samples=4, seed=None):
         if arr.shape[0] <= 10:
             plt.legend(fontsize="small", loc="best")
 
-    plt.tight_layout()
-
 
 def plot_Cs_one_F(C, F_idx, trial_ids: np.array = []):
     trial_keys = list(C.keys())
