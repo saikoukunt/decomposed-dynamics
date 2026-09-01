@@ -4,8 +4,6 @@ from dataclasses import replace
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
-import optax
 from jax import Array, vmap
 from jaxopt import ProximalGradient
 from optax import l2_loss
@@ -14,7 +12,6 @@ from tqdm import trange
 from decomposed_dynamics.dynamics_models import HierarchicalDecomposedDynamics
 from decomposed_dynamics.inference import (
     NoObsInferenceHyperparams,
-    bpdn_inference_no_obs,
 )
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
@@ -29,11 +26,15 @@ def fit_hierarchical_mlps(
     filter_spec: HierarchicalDecomposedDynamics,
     max_iter: int = 200,
     inference_hyperparams: dict | NoObsInferenceHyperparams = {},
+    prox_coeff_max: float = 0.4,
 ) -> HierarchicalDecomposedDynamics:
 
     progress_bar = trange(max_iter)
 
     lr = jnp.linspace(1e-5, lr_init, max_iter)[::-1]
+    prox_coeffs = jnp.linspace(
+        inference_hyperparams.l1_coeff, prox_coeff_max, max_iter
+    )
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
@@ -42,12 +43,10 @@ def fit_hierarchical_mlps(
         latents = latents.reshape(-1, dynamics_model.num_latents)
         C_batch = C_batch.reshape(-1, C_batch.shape[-1])
 
+        inference_hyperparams = replace(inference_hyperparams, l1_coeff=prox_coeffs[i])
         mlp_coeffs = infer_mlp_coeffs(
             dynamics_model, latents, C_batch, inference_hyperparams
         )
-        # mlp_coeffs = np.zeros((latents.shape[0], dynamics_model.num_operators))
-        # mlp_coeffs[:, 0] = 1
-        # mlp_coeffs = jnp.array(mlp_coeffs)
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
             dynamics_model, filter_spec
@@ -65,18 +64,26 @@ def fit_hierarchical_mlps(
         delta_str += eqx_module_to_string(delta_model)
         progress_bar.set_postfix_str(delta_str)
 
-        if i == 1000:
-            inference_hyperparams = replace(inference_hyperparams, l1_coeff=0.2)
-        if i == 2000:
-            inference_hyperparams = replace(inference_hyperparams, l1_coeff=0.4)
-
+        # if i == 1000:
+        #     inference_hyperparams = replace(
+        #         inference_hyperparams, l1_coeff=jnp.array(0.2)
+        #     )
+        # if i == 2000:
+        #     inference_hyperparams = replace(
+        #         inference_hyperparams, l1_coeff=jnp.array(0.3)
+        #     )
+        #
         dynamics_model = updated_model
 
     return dynamics_model
 
 
 @eqx.filter_jit
-def update_dynamics_model(dynamics_model: HierarchicalDecomposedDynamics, grads, lr):
+def update_dynamics_model(
+    dynamics_model: HierarchicalDecomposedDynamics,
+    grads: HierarchicalDecomposedDynamics,
+    lr: Array,
+):
 
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(dynamics_model, grad_updates)
