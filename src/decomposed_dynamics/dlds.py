@@ -57,11 +57,12 @@ def fit_no_obs(
         )
 
         reconstruction_error = float(_dynamics_recon_loss_all(C, X, F_new))
+        X_combined = X.transpose(0,2,1).reshape(-1, X.shape[1]) # samples x observation_dim
+        X_norm = (jnp.linalg.norm(X_combined, axis=1)**2).mean()
         delta_F = float(calculate_delta_F(F_new, F))
         pbar.set_postfix(
-            recon_err=f"{reconstruction_error:.4f}", delta_F=f"{delta_F:.6f}"
+            recon_err=f"{reconstruction_error/X_norm:.4f}", delta_F=f"{delta_F:.6f}"
         )
-
         F = F_new
         F_lr *= F_lr_decay
 
@@ -95,7 +96,7 @@ def infer_no_obs_state_all_trials(
             _dynamics_recon_loss_all(
                 C[trial_key], jnp.expand_dims(data[trial_key], 0), F
             )
-        )
+        ) ### NORMALIZE BY SCALE OF DATA -- DIVIDE BY L2 NORM OF THE RECONSTRUCTION
         pbar.set_postfix(recon_err=f"{reconstruction_error:.4f}")
 
     return C

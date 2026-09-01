@@ -21,6 +21,18 @@ def _dynamics_recon_loss_one_step(
     prediction = c_t @ FX_t
     return 0.5 * jnp.sum((prediction - X_tplus1) ** 2)
 
+# @jit
+# def _dynamics_recon_loss_one_step(
+#     c_t: Array,
+#     FX_t: Array,
+#     X_tplus1: Array,
+#     eps: float = 1e-8,
+# ) -> Array:
+#     prediction = c_t @ FX_t
+#     num = jnp.sum((prediction - X_tplus1) ** 2)
+#     denom = jnp.sum(X_tplus1 ** 2) + eps
+#     return 0.5 * num / denom
+
 
 @jit
 def _dynamics_recon_loss_trial(C: Array, FX: Array, X: Array) -> Array:

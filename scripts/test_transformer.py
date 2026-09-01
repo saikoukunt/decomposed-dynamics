@@ -13,75 +13,72 @@ from plot_dlds_outputs import plot_nonzero_slices
 import numpy as np
 from decomposed_dynamics.dlds import fit_no_obs, infer_no_obs_state_all_trials
 import pickle
-import random
 
 from datetime import datetime
 
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 
-    folderName = "/home/yejz1/workspace/jhu/dlds/rnn_hidden_states"
+    output_dir = f"../outputs/belief_transformer_trainlen25_v3_norm75"
+    os.makedirs(output_dir, exist_ok=True)
+
+    folderName = "/home/yejz1/workspace/jhu/transformer_belief/outputs/train_seqlen25_v2/activations"
     allFiles = sorted(f for f in os.listdir(folderName) if f.endswith(".npy"))
-    rnnAct     = {}
+    print(allFiles)
+    transformerAct     = {}
     trial_ids  = np.array([])
     id_to_task = {}
     kk = 0
     ll = 0
-
-    numTrialsAll = []
-    allActs = []
-    for ll, fname in enumerate(allFiles):
+    for fname in allFiles:
+        print(f"Loading {os.path.join(folderName, fname)}")
         currAct = np.load(os.path.join(folderName, fname), allow_pickle=True)
+        print(f"Data shape: {currAct.shape}")
         id_to_task[ll] = fname[:-4]
 
-        allActs.append(currAct)
-        numTrialsAll.append(currAct.shape[2])
+        # Activations are of dim (trial, squence/time, hidden_units)
+        for trial in range(currAct.shape[0]):
+            # transformerAct[str(kk)] = jnp.array(currAct[trial,:,:].T)
 
+            # Normalize activations so that values in the 75th percentile
+            # are normalized to 1
+            arr = jnp.array(currAct[trial, :, :].T)
+            p75 = jnp.percentile(jnp.abs(arr), 75)
+            transformerAct[str(kk)] = arr / jnp.maximum(p75, 1e-8)
 
-    ### Balance the inputs so that the number of trials per task
-    ### is equal to the minimum number of trials in a single task
-    numTrials = np.min(numTrialsAll)
-    print(f"Loading {numTrials} trials per task")
-    for ll, currAct in enumerate(allActs):
-        if currAct.shape[2] > numTrials:
-            trial_ids_toadd = random.sample(range(currAct.shape[2]), numTrials)
-        else:
-            trial_ids_toadd = range(currAct.shape[2])
-        
-        for trial in trial_ids_toadd:
-            rnnAct[str(kk)] = jnp.array(currAct[:,:,trial])
             trial_ids = np.append(trial_ids, ll)
             kk += 1
-            
+        print(f"Finished loading trials of shape: {transformerAct[str(kk-1)].shape}")
+        ll += 1
     trial_ids = jnp.array(trial_ids)
+
     print(f"size of trial_ids: {trial_ids.shape}")
-    print(f"Loaded {len(rnnAct)} trials of RNN activations, each with shape {rnnAct["0"].shape}.") # shape (hidden_unit, time)
-    
-    c_l1 = 0.3
-    c_smooth = 0.05
+    print(f"{fname}: Loaded {len(transformerAct)} trials of transformer activations.") 
+    # Expected activations shape is (hidden_units, time/seqlen)
+
+    c_l1 = 0.2
+    c_smooth = 0.01
 
     # for c_l1 in [0.1, 0.15, 0.2, 0.25, 0.3, 0.4]:
     #     for c_smooth in [0.05, 0.1, 0.15, 0.2]:
     # for _ in range(5):
     with jax.default_device(jax.devices("cuda")[0]):
         F_hat = fit_no_obs(
-            data=rnnAct, 
-            num_motifs=20, 
-            samples_per_snippet=200, 
-            num_snippets=20, 
-            max_iter=500, 
-            F_lr_init=1, 
+            data=transformerAct, 
+            num_motifs=10, 
+            samples_per_snippet=30, 
+            num_snippets=150, 
+            max_iter=1000, 
+            F_lr_init=.1, 
             c_l1_coeff=c_l1, 
             c_smooth_coeff=c_smooth, 
-            F_l1_coeff=0.000,       # sparsity on F's (latent space only)
-            F_decorr_coeff=0.012     # stop it from learning the same thing in 2 motifs
+            F_l1_coeff=0.001,
+            F_decorr_coeff=0.0
         )
     with jax.default_device(jax.devices("cpu")[0]):
-        C_hat = infer_no_obs_state_all_trials(rnnAct, F_hat, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth)
+        C_hat = infer_no_obs_state_all_trials(transformerAct, F_hat, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth)
 
     now = datetime.now().strftime("%Y%m%dT%H%M%S")
-    output_dir = f"../outputs/rnn_balancedinputs"
-    os.makedirs(output_dir, exist_ok=True)
 
     # Re-organize data for plotting
     task_coeffs = {v:[] for v in id_to_task.values()}
@@ -95,7 +92,7 @@ if __name__ == "__main__":
     for taskname, coeffs in task_coeffs.items():
         coeffs_np = np.concatenate(coeffs, axis=0).transpose(1, 0, 2)
         task_coeffs[taskname] = coeffs_np                   # (motif, trial, timestep)
-        print(f"{taskname}: {coeffs_np.shape}")
+        print(f"Plotting {taskname}: {coeffs_np.shape}")
 
         # Plot data
         plot_nonzero_slices(coeffs_np, title=taskname, output_dir=image_outputdir)
