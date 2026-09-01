@@ -33,10 +33,10 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @abstractmethod
-    def regularize_operators(self, **kwargs) -> Self:
+    def regularize_operators(self, hyperparams: OperatorHyperparams, **kwargs) -> Self:
         raise NotImplementedError
 
-    @jit
+    @eqx.filter_jit
     def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
         return jnp.einsum("...k, ...ki -> ...i", c, flows)
 

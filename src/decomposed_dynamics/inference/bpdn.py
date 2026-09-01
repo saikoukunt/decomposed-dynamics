@@ -174,8 +174,8 @@ def _bpdn_infer_one_no_obs_trial(
     hyperparams: NoObsInferenceHyperparams,
 ) -> Array:
     solver = ProximalGradient(
-        _bpdn_no_obs_least_squares,
-        prox_non_negative_lasso,
+        functools.partial(_bpdn_no_obs_least_squares, dynamics_model=dynamics_model),
+        hyperparams.prox,
         maxiter=hyperparams.max_iter,
         tol=hyperparams.tol,
     )
@@ -212,7 +212,6 @@ def _bpdn_infer_one_no_obs_timestep(
     c_t, _ = solver.run(
         jnp.zeros(dynamics_model.num_operators),
         hyperparams_prox=hyperparams.l1_coeff,
-        dynamics_model=dynamics_model,
         flows=flows,
         x_t=x_t,
         x_tminus1=x_tminus1,
@@ -227,7 +226,6 @@ def _bpdn_infer_one_no_obs_timestep(
         hyperparams_prox=_reweight_l1(
             c_t, hyperparams.l1_coeff, hyperparams.l1_reweight_coeff
         ),
-        dynamics_model=dynamics_model,
         flows=flows,
         x_t=x_t,
         x_tminus1=x_tminus1,
@@ -256,8 +254,8 @@ def _bpdn_no_obs_least_squares(
     null_predictions = dynamics_model.predict_next_state(
         x_tminus1, jnp.zeros_like(c_t), flows
     )
-    variance = jnp.maximum(l2_loss(null_predictions, x_t).sum(axis=-1), 1e-3)
+    variance = jnp.maximum(l2_loss(null_predictions, x_t).sum(axis=-1), 1e-2)
 
     smooth_loss = smooth_coeff * l2_loss(c_t, c_tminus1).sum()
 
-    return dynamics_loss_coeff * reconstruction_loss / variance + smooth_loss
+    return reconstruction_loss / variance + smooth_loss
