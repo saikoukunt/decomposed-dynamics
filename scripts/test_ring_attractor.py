@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -16,10 +17,13 @@ from simulations.ring_attractor import RingAttractorSimulation
 
 from decomposed_dynamics.dynamics_models import (
     DecomposedLinearDynamics,
+    HierarchicalDecomposedDynamics,
 )
+from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps, infer_mlp_coeffs
 from decomposed_dynamics.fitting import fit_no_obs
 from decomposed_dynamics.inference import bpdn_inference_no_obs
 from decomposed_dynamics.inference.base import NoObsInferenceHyperparams
+from decomposed_dynamics.utils import prox_binary
 
 
 def parse_args(argv: list):
@@ -100,7 +104,7 @@ def main():
     plot_speed(ax[0], grid, flows, vmin=0, vmax=0.25, alpha=0.5)
     plot_speed(ax[1], grid, flows, vmin=0, vmax=0.25, alpha=0.5)
 
-    keys = jr.split(jr.key(args.seed), 5)
+    keys = jr.split(jr.key(args.seed), 6)
     x_0 = jr.uniform(
         keys[0],
         shape=(args.num_trajectories, 2),
@@ -128,28 +132,96 @@ def main():
 
     # fit dLDS
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
-    model = DecomposedLinearDynamics(num_operators=6, num_latents=2, key=keys[3])
+    # model = DecomposedLinearDynamics(num_operators=6, num_latents=2, key=keys[3])
+    model = HierarchicalDecomposedDynamics(
+        num_nonlinear_operators=3,
+        num_primitives=6,
+        num_latents=2,
+        primitive_type=DecomposedLinearDynamics,
+        key=keys[3],
+        layer_width=10,
+        num_hidden_layers=4,
+    )
 
     inference_hyperparams = NoObsInferenceHyperparams(l1_coeff=0.7)
-    model = fit_no_obs(
+    model_fit = fit_no_obs(
         trajectory_dict,
-        model,
+        model.primitives,
         samples_per_snippet=60,
         num_snippets=50,
         max_iter=100,
         lr_init=1,
         inference_hyperparams=inference_hyperparams,
-        model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.01),
+        model_update_hyperparams=model.initialize_hyperparams(
+            decorr_coeff=0.005, l1_coeff=0.01
+        ).primitive_hyperparams,
     )
-    C = bpdn_inference_no_obs(model, trajectories, inference_hyperparams)
+    C = bpdn_inference_no_obs(model_fit, trajectories, inference_hyperparams)
 
-    # plot results and example trajectories + inferred c
-    plot_Fs(model.F)
-    plt.suptitle("Learned fs")
-    plt.tight_layout()
+    plot_Fs(model_fit.F)
+    plot_example_trials_with_C(C, trajectories, grid, flows, keys[4], args)
+    plot_c_spatial_maps(C, trajectories)
+    plt.show()
 
+    # fit hierarchical to coefficients
+    model = eqx.tree_at(lambda model: model.primitives, model, model_fit)
+
+    filter_spec = jax.tree_util.tree_map(lambda _: False, model)
+    filter_spec = eqx.tree_at(lambda model: model.G, filter_spec, replace=True)
+    inference_hyperparams = NoObsInferenceHyperparams(
+        l1_coeff=0.1, prox=prox_binary, l1_reweight_coeff=0
+    )
+    trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
+    C_dict = {i: C[i] for i in range(C.shape[0])}
+    C_orig = C.copy()
+
+    model = fit_hierarchical_mlps(
+        trajectory_dict,
+        C_dict,
+        model,
+        samples_per_snippet=20,
+        num_snippets=100,
+        max_iter=5000,
+        lr_init=1,
+        inference_hyperparams=inference_hyperparams,
+        filter_spec=filter_spec,
+    )
+    coords = trajectories[:, :20, :].reshape(-1, 2)
+
+    inference_hyperparams = NoObsInferenceHyperparams(
+        l1_coeff=0.4, prox=prox_binary, l1_reweight_coeff=0
+    )
+    C = infer_mlp_coeffs(model, coords, C.reshape(-1, 6), inference_hyperparams)
+
+    plot_example_trials_with_C(
+        C.reshape(-1, 20, 2), trajectories, grid, flows, keys[5], args
+    )
+    c_grid = model._compute_coeff_predictions_batched(model.G, coords)
+    predicted_c = model.predict_next_state(coords, C, c_grid)
+
+    plot_c_spatial_maps(C, trajectories)
+    plot_c_spatial_maps(predicted_c, trajectories)
+    plot_c_spatial_maps(c_grid[:, 0, :], trajectories)
+    plot_c_spatial_maps(c_grid[:, 1, :], trajectories)
+    plot_c_spatial_maps(c_grid[:, 2, :], trajectories)
+    plt.figure()
+    plot = plt.scatter(
+        coords[:, 0],
+        coords[:, 1],
+        c=c_grid[:, 0, 0] - C_orig.reshape(-1, 6)[:, 0],
+        vmin=-0.1,
+        vmax=0.1,
+        alpha=0.5,
+        s=20,
+        cmap="YlGn_r",
+    )
+    plt.colorbar()
+    plt.show()
+
+
+def plot_example_trials_with_C(C, trajectories, grid, flows, key, args):
     fig, ax = plt.subplots(figsize=(12, 6), nrows=3, ncols=4)
-    rand_inds = jr.randint(keys[4], 6, 0, args.num_trajectories)
+    rand_inds = jr.randint(key, 6, 0, args.num_trajectories)
     for i in range(6):
         row_ind = i % 3
         col_ind = 2 * (i // 3)
@@ -158,48 +230,30 @@ def main():
         plot_trajectories(
             ax[row_ind, col_ind], jnp.expand_dims(trajectories[rand_inds[i]], axis=0)
         )
-        im = ax[row_ind, col_ind + 1].matshow(
-            C[rand_inds[i]].T, aspect="auto", vmin=0.0, vmax=C.max()
-        )
-        fig.colorbar(im, ax=ax[row_ind, col_ind + 1])
+        ax[row_ind, col_ind + 1].plot(C[rand_inds[i]])
     fig.suptitle("Example trajectories and inferred c")
 
-    # plot spatial maps of Cs
+
+def plot_c_spatial_maps(C, trajectories):
     coords = trajectories[:, :20, :].reshape(-1, 2)
-    coeffs = C.reshape(-1, 6)
+    coeffs = C.reshape(-1, C.shape[-1])
 
-    fig, ax = plt.subplots(figsize=(7, 6))
-    plot = ax.scatter(
-        coords[:, 0],
-        coords[:, 1],
-        c=coeffs[:, 2],
-        alpha=0.5,
-        s=20,
-        cmap="YlGn_r",
-    )
-    fig.colorbar(plot, ax=ax)
-    ax.set_title(r"spatial map of $c_2$")
-    plt.tight_layout()
-
-    fig, ax = plt.subplots(figsize=(17, 3), nrows=1, ncols=5)
-    inds = [0, 1, 3, 4, 5]
-    for i in range(5):
+    fig, ax = plt.subplots(figsize=(2 + 3 * C.shape[-1], 3), nrows=1, ncols=C.shape[-1])
+    for i in range(C.shape[-1]):
         plot = ax[i].scatter(
             coords[:, 0],
             coords[:, 1],
-            c=coeffs[:, inds[i]],
+            c=coeffs[:, i],
+            vmin=0,
+            vmax=1.5,
             alpha=0.5,
             s=20,
             cmap="YlGn_r",
         )
         fig.colorbar(plot, ax=ax[i])
-        ax[i].set_title(rf"spatial map of $c_{inds[i]}$")
+        ax[i].set_title(rf"spatial map of $c_{i}$")
 
     plt.tight_layout()
-    plt.show()
-
-    jnp.save("./coeffs.npy", coeffs[:, 2])
-    jnp.save("./coords.npy", coords)
 
 
 if __name__ == "__main__":

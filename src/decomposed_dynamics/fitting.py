@@ -93,6 +93,7 @@ def fit_no_obs(
     max_iter: int = 200,
     model_update_hyperparams: dict | OperatorHyperparams = {},
     inference_hyperparams: dict | NoObsInferenceHyperparams = {},
+    filter_spec=None,
 ) -> DecomposedDynamicsModel:
     if type(model_update_hyperparams) is dict:
         model_update_hyperparams = dynamics_model.initialize_hyperparams(
@@ -101,6 +102,9 @@ def fit_no_obs(
 
     if type(inference_hyperparams) is dict:
         inference_hyperparams = NoObsInferenceHyperparams(**inference_hyperparams)
+
+    if filter_spec is None:
+        filter_spec = jax.tree_util.tree_map(lambda _: True, dynamics_model)
 
     lr = lr_init
     progress_bar = trange(max_iter)
@@ -112,8 +116,11 @@ def fit_no_obs(
             dynamics_model, latents, inference_hyperparams
         )
 
+        diff_dynamics_model, static_dynamics_model = eqx.partition(
+            dynamics_model, filter_spec
+        )
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
-            dynamics_model, latents, operator_coeffs
+            diff_dynamics_model, static_dynamics_model, latents, operator_coeffs
         )
         updated_model, delta_model = update_dynamics_model(
             dynamics_model,
@@ -173,10 +180,12 @@ def update_dynamics_model(
 
 @eqx.filter_jit
 def compute_dynamics_recon_loss(
-    dynamics_model: DecomposedDynamicsModel,
+    diff_dynamics_model: DecomposedDynamicsModel,
+    static_dynamics_model: DecomposedDynamicsModel,
     latents: Array,
     operator_coeffs: Array,
 ):
+    dynamics_model = eqx.combine(diff_dynamics_model, static_dynamics_model)
     return vmap(compute_dynamics_recon_loss_sequence, in_axes=(None, 0, 0))(
         dynamics_model, latents, operator_coeffs
     ).mean()

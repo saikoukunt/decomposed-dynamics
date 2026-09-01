@@ -1,7 +1,9 @@
+from typing import Any, Optional
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, jit
+from jax import Array, jit, tree_util
 
 
 def extract_snippets(
@@ -102,3 +104,24 @@ def eqx_module_to_string(module):
         str += f", Avg \U0001d6ab{jax.tree_util.keystr(path)[1:]}: {val:.5f}"
 
     return str
+
+
+def prox_binary(x: Any, l1reg: Optional[float] = None, scaling: float = 1.0) -> Any:
+    if l1reg is None:
+        l1reg = 1.0
+
+    def prox(y):
+        to_zero = jax.nn.relu(y - l1reg * scaling)
+        one_dist = y - 1
+        to_one = 1 + jnp.sign(one_dist) * jax.nn.relu(
+            jnp.abs(one_dist) - l1reg * scaling
+        )
+        to_one = jax.nn.relu(to_one)
+
+        def obj(z):
+            R = jnp.minimum(z, jnp.abs(z - 1))
+            return 0.5 * (z - y) ** 2 + R * l1reg * scaling
+
+        return jnp.where(obj(to_zero) <= obj(to_one), to_zero, to_one)
+
+    return tree_util.tree_map(prox, x)
