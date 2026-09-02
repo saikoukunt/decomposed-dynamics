@@ -18,7 +18,8 @@ import random
 from datetime import datetime
 
 if __name__ == "__main__":
-    seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    # seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    random.seed(42)
 
     folderName = "/home/yejz1/workspace/jhu/dlds/rnn_hidden_states"
     allFiles = sorted(f for f in os.listdir(folderName) if f.endswith(".npy"))
@@ -38,18 +39,34 @@ if __name__ == "__main__":
         numTrialsAll.append(currAct.shape[2])
 
 
-    ### Balance the inputs so that the number of trials per task
-    ### is equal to the minimum number of trials in a single task
-    numTrials = np.min(numTrialsAll)
-    print(f"Loading {numTrials} trials per task")
-    for ll, currAct in enumerate(allActs):
-        if currAct.shape[2] > numTrials:
-            trial_ids_toadd = random.sample(range(currAct.shape[2]), numTrials)
-        else:
-            trial_ids_toadd = range(currAct.shape[2])
+    # ### Balance the inputs so that the number of trials per task
+    # ### is equal to the minimum number of trials in a single task
+    # numTrials = np.min(numTrialsAll)
+    # print(f"Loading {numTrials} trials per task")
+    # for ll, currAct in enumerate(allActs):
+    #     if currAct.shape[2] > numTrials:
+    #         trial_ids_toadd = random.sample(range(currAct.shape[2]), numTrials)
+    #     else:
+    #         trial_ids_toadd = range(currAct.shape[2])
         
+    #     for trial in trial_ids_toadd:
+    #         rnnAct[str(kk)] = jnp.array(currAct[:,:,trial])
+    #         trial_ids = np.append(trial_ids, ll)
+    #         kk += 1
+
+    numTrials = np.max(numTrialsAll)
+
+    for ll, currAct in enumerate(allActs):
+        n_trials = currAct.shape[2]
+
+        trial_ids_toadd = np.random.choice(
+            n_trials,
+            size=numTrials,
+            replace=(n_trials < numTrials),
+        )
+
         for trial in trial_ids_toadd:
-            rnnAct[str(kk)] = jnp.array(currAct[:,:,trial])
+            rnnAct[str(kk)] = jnp.array(currAct[:, :, trial])
             trial_ids = np.append(trial_ids, ll)
             kk += 1
             
@@ -67,9 +84,9 @@ if __name__ == "__main__":
         F_hat = fit_no_obs(
             data=rnnAct, 
             num_motifs=20, 
-            samples_per_snippet=200, 
+            samples_per_snippet=30, 
             num_snippets=20, 
-            max_iter=500, 
+            max_iter=1000, 
             F_lr_init=1, 
             c_l1_coeff=c_l1, 
             c_smooth_coeff=c_smooth, 
