@@ -12,8 +12,8 @@ from decomposed_dynamics.dynamics_models import (
 from decomposed_dynamics.inference import (
     InferenceHyperparams,
     NoObsInferenceHyperparams,
-    bpdn_inference,
-    bpdn_inference_no_obs,
+    bpdn_df_inference,
+    bpdn_df_inference_no_obs,
 )
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
@@ -47,9 +47,10 @@ def fit(
             data, num_snippets, samples_per_snippet, seed=i
         )
 
-        latents, operator_coeffs = bpdn_inference(
+        latents, operator_coeffs = bpdn_df_inference(
             observation_model,
             dynamics_model,
+            dynamics_model.compute_operator_flows,
             observations,
             inference_hyperparams,
         )
@@ -112,8 +113,12 @@ def fit_no_obs(
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
-        operator_coeffs = bpdn_inference_no_obs(
-            dynamics_model, latents, inference_hyperparams
+        operator_coeffs = bpdn_df_inference_no_obs(
+            dynamics_model,
+            dynamics_model.compute_operator_flows,
+            latents[:, :-1, :],
+            latents[:, 1:, :],
+            inference_hyperparams,
         )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -198,12 +203,12 @@ def compute_dynamics_recon_loss_sequence(
     operator_coeffs: Array,
 ):
     flows = dynamics_model.compute_operator_flows(latents[:-1, :])
-    predictions = dynamics_model.predict_next_state(
+    predictions = dynamics_model.combine_operator_predictions(
         latents[:-1, :], operator_coeffs, flows
     )
     mse = l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
 
-    null_predictions = dynamics_model.predict_next_state(
+    null_predictions = dynamics_model.combine_operator_predictions(
         latents[:-1, :], jnp.zeros_like(operator_coeffs), flows
     )
     variance = jnp.maximum(

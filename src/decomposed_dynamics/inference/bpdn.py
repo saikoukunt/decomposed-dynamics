@@ -1,4 +1,5 @@
 import functools
+from typing import Callable
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -17,16 +18,18 @@ from decomposed_dynamics.utils import _reweight_l1
 
 
 @eqx.filter_jit
-def bpdn_inference(
+def bpdn_df_inference(
     observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
+    compute_per_operator_predictions: Callable,
     observations: Array,
     hyperparams: InferenceHyperparams,
 ):
     infer_one_trial = functools.partial(
-        _bpdn_infer_one_trial,
+        _bpdn_df_infer_one_trial,
         observation_model,
         dynamics_model,
+        compute_per_operator_predictions,
         hyperparams=hyperparams,
     )
     state = vmap(infer_one_trial)(observations)
@@ -38,23 +41,25 @@ def bpdn_inference(
 
 
 @eqx.filter_jit
-def _bpdn_infer_one_trial(
+def _bpdn_df_infer_one_trial(
     observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
+    compute_per_operator_predictions: Callable,
     observations: Array,
     hyperparams: InferenceHyperparams,
 ) -> Array:
     solver = ProximalGradient(
-        _bpdn_least_squares,
+        _bpdn_df_least_squares,
         prox_non_negative_lasso,
         maxiter=hyperparams.max_iter,
         tol=hyperparams.tol,
     )
 
     infer_one_timestep = functools.partial(
-        _bpdn_infer_one_timestep,
+        _bpdn_df_infer_one_timestep,
         observation_model=observation_model,
         dynamics_model=dynamics_model,
+        compute_per_operator_predictions=compute_per_operator_predictions,
         solver=solver,
         hyperparams=hyperparams,
     )
@@ -71,20 +76,21 @@ def _bpdn_infer_one_trial(
 
 
 @eqx.filter_jit
-def _bpdn_infer_one_timestep(
+def _bpdn_df_infer_one_timestep(
     carry: tuple[Array, Array],
-    y_t: Array,
+    observations: Array,
     observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
+    compute_per_operator_predictions: Callable,
     solver: ProximalGradient,
     hyperparams: InferenceHyperparams,
 ) -> tuple[tuple[Array, Array], Array]:
 
     state, is_first = carry
-    x_tminus1 = state[: dynamics_model.num_latents]
-    c_tminus1 = state[dynamics_model.num_latents :]
+    prev_latents = state[: dynamics_model.num_latents]
+    prev_coeffs = state[dynamics_model.num_latents :]
 
-    flows = dynamics_model.compute_operator_flows(x_tminus1)
+    per_operator_predictions = compute_per_operator_predictions(prev_latents)
     smooth_coeff = jnp.where(is_first, 0.0, hyperparams.smooth_coeff)
     l1_coeff = hyperparams.l1_coeff * jnp.ones(
         dynamics_model.num_latents + dynamics_model.num_operators
@@ -95,12 +101,12 @@ def _bpdn_infer_one_timestep(
     state, _ = solver.run(
         jnp.zeros(dynamics_model.num_latents + dynamics_model.num_operators),
         hyperparams_prox=l1_coeff,
-        obs_model=observation_model,
+        observation_model=observation_model,
         dynamics_model=dynamics_model,
-        flows=flows,
-        y_t=y_t,
-        c_tminus1=c_tminus1,
-        x_tminus1=x_tminus1,
+        per_operator_predictions=per_operator_predictions,
+        observations=observations,
+        prev_coeffs=prev_coeffs,
+        prev_latents=prev_latents,
         dynamics_loss_coeff=hyperparams.dynamics_loss_coeff,
         smooth_coeff=smooth_coeff,
     )
@@ -111,10 +117,10 @@ def _bpdn_infer_one_timestep(
         hyperparams_prox=_reweight_l1(state, l1_coeff, hyperparams.l1_reweight_coeff),
         obs_model=observation_model,
         dynamics_model=dynamics_model,
-        flows=flows,
-        y_t=y_t,
-        c_tminus1=c_tminus1,
-        x_tminus1=x_tminus1,
+        flows=per_operator_predictions,
+        y_t=observations,
+        c_tminus1=prev_coeffs,
+        x_tminus1=prev_latents,
         dynamics_loss_coeff=hyperparams.dynamics_loss_coeff,
         smooth_coeff=smooth_coeff,
     )
@@ -127,135 +133,147 @@ def _bpdn_infer_one_timestep(
 
 
 @eqx.filter_jit
-def _bpdn_least_squares(
+def _bpdn_df_least_squares(
     state: Array,
-    obs_model: ObservationModel,
+    observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
-    flows: Array,
-    y_t: Array,
-    c_tminus1: Array,
-    x_tminus1: Array,
+    per_operator_predictions: Array,
+    observations: Array,
+    prev_coeffs: Array,
+    prev_latents: Array,
     dynamics_loss_coeff: Array,
     smooth_coeff: Array,
 ) -> Array:
-    x_t = state[: dynamics_model.num_latents]
-    c_t = state[dynamics_model.num_latents :]
+    latents = state[: dynamics_model.num_latents]
+    coeffs = state[dynamics_model.num_latents :]
 
-    rates = obs_model.predict_rates(x_t)
-    data_nll = obs_model.neg_log_likelihood(rates, y_t)
+    rates = observation_model.predict_rates(latents)
+    data_nll = observation_model.neg_log_likelihood(rates, observations)
 
-    predicted_state = dynamics_model.predict_next_state(x_tminus1, c_t, flows)
-    dynamics_recon_loss = dynamics_loss_coeff * l2_loss(predicted_state, x_t).sum()
+    predicted_state = dynamics_model.combine_operator_predictions(
+        prev_latents, coeffs, per_operator_predictions
+    )
+    dynamics_recon_loss = dynamics_loss_coeff * l2_loss(predicted_state, latents).sum()
 
-    smooth_loss = smooth_coeff * l2_loss(c_t, c_tminus1).sum()
+    smooth_loss = smooth_coeff * l2_loss(coeffs, prev_coeffs).sum()
 
     return data_nll + dynamics_recon_loss + smooth_loss
 
 
 @eqx.filter_jit
-def bpdn_inference_no_obs(
+def bpdn_df_inference_no_obs(
     dynamics_model: DecomposedDynamicsModel,
-    X: Array,
+    compute_per_operator_predictions: Callable,
+    latents: Array,
+    targets: Array,
     hyperparams: NoObsInferenceHyperparams,
 ) -> Array:
 
     infer_one_trial = functools.partial(
-        _bpdn_infer_one_no_obs_trial,
+        _bpdn_df_infer_one_no_obs_trial,
         dynamics_model,
+        compute_per_operator_predictions,
         hyperparams=hyperparams,
     )
-    return vmap(infer_one_trial)(X)
+    return vmap(infer_one_trial)(latents, targets)
 
 
 @eqx.filter_jit
-def _bpdn_infer_one_no_obs_trial(
+def _bpdn_df_infer_one_no_obs_trial(
     dynamics_model: DecomposedDynamicsModel,
+    compute_per_operator_predictions: Callable,
     latents: Array,
+    targets: Array,
     hyperparams: NoObsInferenceHyperparams,
 ) -> Array:
     solver = ProximalGradient(
-        functools.partial(_bpdn_no_obs_least_squares, dynamics_model=dynamics_model),
+        functools.partial(_bpdn_df_no_obs_least_squares, dynamics_model=dynamics_model),
         hyperparams.prox,
         maxiter=hyperparams.max_iter,
         tol=hyperparams.tol,
     )
     infer_one_timestep = functools.partial(
-        _bpdn_infer_one_no_obs_timestep,
+        _bpdn_df_infer_one_no_obs_timestep,
         dynamics_model=dynamics_model,
+        compute_per_operator_predictions=compute_per_operator_predictions,
         solver=solver,
         hyperparams=hyperparams,
     )
     _, C = lax.scan(
         infer_one_timestep,
         (jnp.zeros(dynamics_model.num_operators), jnp.bool_(True)),
-        (latents[:-1, :], latents[1:, :]),
+        (latents, targets),
     )
 
     return C
 
 
 @eqx.filter_jit
-def _bpdn_infer_one_no_obs_timestep(
+def _bpdn_df_infer_one_no_obs_timestep(
     carry: tuple[Array, Array],
     xs: tuple[Array, Array],
     dynamics_model: DecomposedDynamicsModel,
+    compute_per_operator_predictions: Callable,
     solver: ProximalGradient,
     hyperparams: NoObsInferenceHyperparams,
 ) -> tuple[tuple[Array, Array], Array]:
 
-    c_tminus1, is_first = carry
-    x_tminus1, x_t = xs
-    flows = dynamics_model.compute_operator_flows(x_tminus1)
+    prev_coeffs, is_first = carry
+    latents, targets = xs
+    per_operator_predictions = compute_per_operator_predictions(latents)
     smooth_coeff = jnp.where(is_first, 0.0, hyperparams.smooth_coeff)
 
     # solve vanilla L1
-    c_t, _ = solver.run(
+    coeffs, _ = solver.run(
         jnp.zeros(dynamics_model.num_operators),
         hyperparams_prox=hyperparams.l1_coeff,
-        flows=flows,
-        x_t=x_t,
-        x_tminus1=x_tminus1,
-        c_tminus1=c_tminus1,
+        per_operator_predictions=per_operator_predictions,
+        targets=targets,
+        latents=latents,
+        prev_coeffs=prev_coeffs,
         dynamics_loss_coeff=hyperparams.dynamics_loss_coeff,
         smooth_coeff=smooth_coeff,
     )
 
     # solve reweighted L1 using previous as warm start
-    c_t, _ = solver.run(
-        c_t,
+    coeffs, _ = solver.run(
+        coeffs,
         hyperparams_prox=_reweight_l1(
-            c_t, hyperparams.l1_coeff, hyperparams.l1_reweight_coeff
+            coeffs, hyperparams.l1_coeff, hyperparams.l1_reweight_coeff
         ),
-        flows=flows,
-        x_t=x_t,
-        x_tminus1=x_tminus1,
-        c_tminus1=c_tminus1,
+        per_operator_predictions=per_operator_predictions,
+        targets=targets,
+        latents=latents,
+        prev_coeffs=prev_coeffs,
         dynamics_loss_coeff=hyperparams.dynamics_loss_coeff,
         smooth_coeff=smooth_coeff,
     )
 
-    c_t = jnp.where(jnp.any(jnp.isnan(c_t)), jnp.zeros_like(c_t), c_t)
-    return (c_t, jnp.bool_(False)), c_t
+    coeffs = jnp.where(jnp.any(jnp.isnan(coeffs)), jnp.zeros_like(coeffs), coeffs)
+    return (coeffs, jnp.bool_(False)), coeffs
 
 
 @eqx.filter_jit
-def _bpdn_no_obs_least_squares(
-    c_t: Array,
+def _bpdn_df_no_obs_least_squares(
+    coeffs: Array,
     dynamics_model: DecomposedDynamicsModel,
-    flows: Array,
-    x_t: Array,
-    x_tminus1: Array,
-    c_tminus1: Array,
+    per_operator_predictions: Array,
+    targets: Array,
+    latents: Array,
+    prev_coeffs: Array,
     dynamics_loss_coeff: Array,
     smooth_coeff: Array,
 ) -> Array:
-    predicted_state = dynamics_model.predict_next_state(x_tminus1, c_t, flows)
-    reconstruction_loss = l2_loss(predicted_state, x_t).sum()
-    null_predictions = dynamics_model.predict_next_state(
-        x_tminus1, jnp.zeros_like(c_t), flows
+    prediction = dynamics_model.combine_operator_predictions(
+        latents, coeffs, per_operator_predictions
     )
-    variance = jnp.maximum(l2_loss(null_predictions, x_t).sum(axis=-1), 1e-2)
+    reconstruction_loss = l2_loss(prediction, targets).sum()
 
-    smooth_loss = smooth_coeff * l2_loss(c_t, c_tminus1).sum()
+    null_prediction = dynamics_model.combine_operator_predictions(
+        latents, jnp.zeros_like(coeffs), per_operator_predictions
+    )
+    variance = jnp.maximum(l2_loss(null_prediction, targets).sum(axis=-1), 1e-2)
+
+    smooth_loss = smooth_coeff * l2_loss(coeffs, prev_coeffs).sum()
 
     return reconstruction_loss / variance + smooth_loss

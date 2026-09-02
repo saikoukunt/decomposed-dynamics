@@ -21,7 +21,7 @@ from decomposed_dynamics.dynamics_models import (
 )
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps, infer_mlp_coeffs
 from decomposed_dynamics.fitting import fit_no_obs
-from decomposed_dynamics.inference import bpdn_inference_no_obs
+from decomposed_dynamics.inference import bpdn_df_inference_no_obs
 from decomposed_dynamics.inference.base import NoObsInferenceHyperparams
 from decomposed_dynamics.utils import prox_binary
 
@@ -134,7 +134,7 @@ def main():
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
     # model = DecomposedLinearDynamics(num_operators=6, num_latents=2, key=keys[3])
     model = HierarchicalDecomposedDynamics(
-        num_nonlinear_operators=3,
+        num_nonlinear_operators=2,
         num_primitives=6,
         num_latents=2,
         primitive_type=DecomposedLinearDynamics,
@@ -156,11 +156,18 @@ def main():
             decorr_coeff=0.005, l1_coeff=0.01
         ).primitive_hyperparams,
     )
-    C = bpdn_inference_no_obs(model_fit, trajectories, inference_hyperparams)
+    C = bpdn_df_inference_no_obs(
+        model_fit,
+        model_fit.compute_operator_flows,
+        trajectories[:, :-1, :],
+        trajectories[:, 1:, :],
+        inference_hyperparams,
+    )
 
     plot_Fs(model_fit.F)
     plot_example_trials_with_C(C, trajectories, grid, flows, keys[4], args)
     plot_c_spatial_maps(C, trajectories)
+    fig.suptitle("dLDS inferred coefficients")
     plt.show()
 
     # fit hierarchical to coefficients
@@ -169,7 +176,7 @@ def main():
     filter_spec = jax.tree_util.tree_map(lambda _: False, model)
     filter_spec = eqx.tree_at(lambda model: model.G, filter_spec, replace=True)
     inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=0.1, prox=prox_binary, l1_reweight_coeff=0
+        l1_coeff=0.01, prox=prox_binary, l1_reweight_coeff=0
     )
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
     C_dict = {i: C[i] for i in range(C.shape[0])}
@@ -197,13 +204,19 @@ def main():
         C.reshape(-1, 20, 2), trajectories, grid, flows, keys[5], args
     )
     c_grid = model._compute_coeff_predictions_batched(model.G, coords)
-    predicted_c = model.predict_next_state(coords, C, c_grid)
+    predicted_c = model.combine_operator_predictions(coords, C, c_grid)
 
-    plot_c_spatial_maps(C, trajectories)
-    plot_c_spatial_maps(predicted_c, trajectories)
-    plot_c_spatial_maps(c_grid[:, 0, :], trajectories)
-    plot_c_spatial_maps(c_grid[:, 1, :], trajectories)
-    plot_c_spatial_maps(c_grid[:, 2, :], trajectories)
+    fig = plot_c_spatial_maps(C, trajectories)
+    fig.suptitle(r"spatial map of MLP coefficients $d$")
+
+    fig = plot_c_spatial_maps(predicted_c, trajectories)
+    fig.suptitle("Weighted MLP predictions")
+
+    for i in range(c_grid.shape[1]):
+        fig = plot_c_spatial_maps(c_grid[:, i, :], trajectories)
+        fig.suptitle(f"MLP {i} map")
+
+    # TODO: un hard code this
     plt.figure()
     plot = plt.scatter(
         coords[:, 0],
@@ -215,6 +228,7 @@ def main():
         s=20,
         cmap="YlGn_r",
     )
+    plt.title("Residuals between spatial map of dLDS coeffs and MLP 0")
     plt.colorbar()
     plt.show()
 
@@ -254,6 +268,7 @@ def plot_c_spatial_maps(C, trajectories):
         ax[i].set_title(rf"spatial map of $c_{i}$")
 
     plt.tight_layout()
+    return fig
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @eqx.filter_jit
-    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
+    def combine_operator_predictions(self, x: Array, c: Array, flows: Array) -> Array:
         return jnp.einsum("...k, ...ki -> ...i", c, flows)
 
 

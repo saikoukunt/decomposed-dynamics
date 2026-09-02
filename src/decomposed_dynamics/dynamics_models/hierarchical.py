@@ -98,6 +98,9 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
 
         return jnp.einsum("...mk, ...ki -> ...mi", primitive_coeffs, primitive_flows)
 
+    def compute_coeff_predictions(self, x: Array) -> Array:
+        return self._compute_coeff_predictions(self.G, x)
+
     @eqx.filter_vmap(in_axes=(None, eqx.if_array(0), None))
     def _compute_coeff_predictions(self, G: eqx.nn.MLP, x: Array) -> Array:
         return G(x)
