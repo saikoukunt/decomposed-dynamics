@@ -87,6 +87,40 @@ def parse_args(argv: list):
     return parser.parse_args(argv)
 
 
+def plot_MLP_flow_field(
+    model: HierarchicalDecomposedDynamics,
+    mlp_ind: int,
+    start: float,
+    stop: float,
+    step: float,
+    **plot_kwargs,
+):
+
+    fig, ax = plt.subplots(figsize=(12, 6), nrows=1, ncols=1)
+
+    axis = jnp.arange(start, stop + step, step)
+    grid = jnp.meshgrid(*([axis] * model.state_dim))
+    flat_grid = jnp.array([axis.flatten() for axis in grid]).T
+
+    flat_operator_predictions = model.compute_operator_flows(flat_grid)[:, mlp_ind, :]
+    flat_flow = flat_operator_predictions - flat_grid
+    flows = flat_flow.reshape(axis.shape[0], axis.shape[0], model.state_dim)
+
+    ax.streamplot(
+        axis,
+        axis,
+        flows[:, :, 0],
+        flows[:, :, 1],
+        density=1,
+        color="grey",
+        linewidth=1,
+    )
+
+    plot_speed(ax, grid, flows, **plot_kwargs)
+
+    return fig
+
+
 def main():
     args = parse_args(sys.argv[1:])
     if args is None:
@@ -211,6 +245,9 @@ def main():
 
     fig = plot_c_spatial_maps(predicted_c, trajectories)
     fig.suptitle("Weighted MLP predictions")
+
+    fig = plot_MLP_flow_field(model, 2, -args.max_radius, args.max_radius, 0.05)
+    fig.suptitle("MLP 2 flow field")
 
     for i in range(c_grid.shape[1]):
         fig = plot_c_spatial_maps(c_grid[:, i, :], trajectories)
