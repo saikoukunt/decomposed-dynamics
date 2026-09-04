@@ -166,7 +166,6 @@ def bpdn_inference_no_obs(
     )
     return vmap(infer_one_trial)(X)
 
-
 @eqx.filter_jit
 def _bpdn_infer_one_no_obs_trial(
     dynamics_model: DecomposedDynamicsModel,

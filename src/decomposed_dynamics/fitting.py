@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from jax import Array, vmap
 from optax import l2_loss
 from tqdm import trange
+from numpy.typing import NDArray
 
 from decomposed_dynamics.dynamics_models import (
     DecomposedDynamicsModel,
@@ -93,6 +94,7 @@ def fit_no_obs(
     max_iter: int = 200,
     model_update_hyperparams: dict | OperatorHyperparams = {},
     inference_hyperparams: dict | NoObsInferenceHyperparams = {},
+    sampling_weights: None | NDArray = None,
 ) -> DecomposedDynamicsModel:
     if type(model_update_hyperparams) is dict:
         model_update_hyperparams = dynamics_model.initialize_hyperparams(
@@ -106,7 +108,7 @@ def fit_no_obs(
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
-        latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
+        latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i, sampling_weights=sampling_weights)
 
         operator_coeffs = bpdn_inference_no_obs(
             dynamics_model, latents, inference_hyperparams

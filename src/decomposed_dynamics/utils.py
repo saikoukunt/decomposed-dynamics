@@ -1,11 +1,15 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 from jax import Array, jit
 
-
 def extract_snippets(
-    trial_data: dict, num_snippets: int, samples_per_snippet: int, seed: int
+    trial_data: dict, 
+    num_snippets: int, 
+    samples_per_snippet: int, 
+    seed: int,
+    sampling_weights: None | NDArray = None, 
 ) -> tuple[Array, Array]:
     keys = list(trial_data.keys())
 
@@ -22,7 +26,10 @@ def extract_snippets(
     if num_snippets == num_trials:
         trial_inds = np.arange(num_snippets)
     else:
-        trial_inds = rng.choice(num_trials, num_snippets)
+        if sampling_weights is None:
+            trial_inds = rng.choice(num_trials, num_snippets)
+        else:    
+            trial_inds = rng.choice(num_trials, num_snippets, p=sampling_weights)
 
     for i, trial_ind in enumerate(trial_inds):
         t_start = rng.choice(trial_length - snippet_length + 1)
