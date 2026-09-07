@@ -54,7 +54,7 @@ if __name__ == "__main__":
     # seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     random.seed(42)
 
-    folderName = "/home/yejz1/workspace/jhu/dlds/rnn_hidden_states"
+    folderName = "/cis/home/jye/Workspace/dLDS-multitask-rnn/dLDS/rnn_hidden_states"
     allFiles = sorted(f for f in os.listdir(folderName) if f.endswith(".npy"))
     rnnAct     = {}
     trial_ids  = np.array([])
@@ -72,7 +72,8 @@ if __name__ == "__main__":
     numTrialsAll = []
     allActs = []
     sampling_weights = np.array([])
-
+    
+    data_descriptions = {}
     for fname in allFiles:
         currAct = np.load(os.path.join(folderName, fname), allow_pickle=True)
         for trial in range(currAct.shape[2]):
@@ -80,6 +81,8 @@ if __name__ == "__main__":
             trial_ids = np.append(trial_ids, ll)
             id_to_task[ll] = fname[:-4]
             sampling_weights = np.append(sampling_weights, prevalenceMap[fname[:-4]])
+            if fname[:-4] not in data_descriptions.keys():
+                data_descriptions[fname[:-4]]= currAct.shape
             kk += 1
         ll += 1
     trial_ids = jnp.array(trial_ids)
@@ -88,8 +91,7 @@ if __name__ == "__main__":
     print(f"size of trial_ids: {trial_ids.shape}")
     print(f"Loaded {len(rnnAct)} trials of RNN activations") # shape (hidden_unit, time)
     
-    print("Total trials: ", np.max([int (k) for k in rnnAct.keys()]))
-    print("Lenth of input dict: ", len(rnnAct))
+    print("Data sizes: ", data_descriptions)
     
     # c_l1 = 0.22
     # c_smooth = 0.07
@@ -106,10 +108,10 @@ if __name__ == "__main__":
                     dynamics_model=model,
                     samples_per_snippet=30, 
                     num_snippets=20, 
-                    max_iter=1000, 
+                    max_iter=5000, 
                     lr_init=1, 
                     inference_hyperparams=inference_hyperparams, 
-                    model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.03),
+                    model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.01),
                     sampling_weights=sampling_weights
                     # operator_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.01),
                 )
