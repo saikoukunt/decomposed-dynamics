@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, tree_util
+from jaxopt.prox import prox_non_negative_lasso
 
 
 def extract_snippets(
@@ -106,22 +107,29 @@ def eqx_module_to_string(module):
     return str
 
 
-def prox_binary(x: Any, l1reg: Optional[float] = None, scaling: float = 1.0) -> Any:
-    if l1reg is None:
-        l1reg = 1.0
+def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -> Any:
+    if _lambda is None:
+        _lambda = 1.0
 
     def prox(y):
-        to_zero = jax.nn.relu(y - l1reg * scaling)
+        to_zero = jax.nn.relu(y - _lambda * scaling)
         one_dist = y - 1
         to_one = 1 + jnp.sign(one_dist) * jax.nn.relu(
-            jnp.abs(one_dist) - l1reg * scaling
+            jnp.abs(one_dist) - _lambda * scaling
         )
         to_one = jax.nn.relu(to_one)
 
         def obj(z):
             R = jnp.minimum(z, jnp.abs(z - 1))
-            return 0.5 * (z - y) ** 2 + R * l1reg * scaling
+            return 0.5 * (z - y) ** 2 + R * _lambda * scaling
 
         return jnp.where(obj(to_zero) <= obj(to_one), to_zero, to_one)
 
     return tree_util.tree_map(prox, x)
+
+
+def prox_l1_binary(x: Any, l1_coeff, scaling: float = 1.0, _lambda=0) -> Any:
+    x = prox_non_negative_lasso(x, l1_coeff, scaling)
+    x = prox_binary(x, _lambda, scaling)
+
+    return x
