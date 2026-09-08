@@ -12,6 +12,7 @@ from tqdm import trange
 from decomposed_dynamics.dynamics_models import HierarchicalDecomposedDynamics
 from decomposed_dynamics.inference import (
     NoObsInferenceHyperparams,
+    bpdn_df_inference_no_obs,
 )
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
@@ -31,21 +32,29 @@ def fit_hierarchical_mlps(
 
     progress_bar = trange(max_iter)
 
-    lr = jnp.linspace(1e-5, lr_init, max_iter)[::-1]
+    lr = jnp.linspace(1e-4, lr_init, max_iter)[::-1]
     prox_coeffs = jnp.linspace(
-        inference_hyperparams.l1_coeff, prox_coeff_max, max_iter
+        inference_hyperparams.l1_coeff, prox_coeff_max, int(max_iter / 2)
     )
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
         C_batch, _ = extract_snippets(C, num_snippets, samples_per_snippet, seed=i)
 
-        latents = latents.reshape(-1, dynamics_model.num_latents)
-        C_batch = C_batch.reshape(-1, C_batch.shape[-1])
-
-        inference_hyperparams = replace(inference_hyperparams, l1_coeff=prox_coeffs[i])
-        mlp_coeffs = infer_mlp_coeffs(
-            dynamics_model, latents, C_batch, inference_hyperparams
+        if i < max_iter / 2:
+            inference_hyperparams = replace(
+                inference_hyperparams, l1_coeff=prox_coeffs[i]
+            )
+        else:
+            inference_hyperparams = replace(
+                inference_hyperparams, l1_coeff=prox_coeffs[-1]
+            )
+        mlp_coeffs = bpdn_df_inference_no_obs(
+            dynamics_model,
+            dynamics_model.compute_coeff_predictions,
+            latents,
+            C_batch,
+            inference_hyperparams,
         )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -54,6 +63,7 @@ def fit_hierarchical_mlps(
         recon_loss, recon_grads = recon_loss_value_and_grad(
             diff_dynamics_model, static_dynamics_model, mlp_coeffs, C_batch, latents
         )
+
         updated_model, delta_model = update_dynamics_model(
             dynamics_model,
             recon_grads,
@@ -64,15 +74,6 @@ def fit_hierarchical_mlps(
         delta_str += eqx_module_to_string(delta_model)
         progress_bar.set_postfix_str(delta_str)
 
-        # if i == 1000:
-        #     inference_hyperparams = replace(
-        #         inference_hyperparams, l1_coeff=jnp.array(0.2)
-        #     )
-        # if i == 2000:
-        #     inference_hyperparams = replace(
-        #         inference_hyperparams, l1_coeff=jnp.array(0.3)
-        #     )
-        #
         dynamics_model = updated_model
 
     return dynamics_model
@@ -142,7 +143,7 @@ def recon_loss(
     c_t: Array, model: HierarchicalDecomposedDynamics, target_c_t: Array, x_t: Array
 ):
     predicted_cs = model._compute_coeff_predictions(model.G, x_t)
-    predicted_cs = model.predict_next_state(x_t, c_t, predicted_cs)
+    predicted_cs = model.combine_operator_predictions(x_t, c_t, predicted_cs)
     return l2_loss(predicted_cs, target_c_t).sum()
 
 
@@ -150,20 +151,42 @@ def recon_loss(
 def recon_loss_diff(
     diff_model: HierarchicalDecomposedDynamics,
     static_model: HierarchicalDecomposedDynamics,
-    c_t: Array,
-    target_c_t: Array,
-    x_t: Array,
+    coeffs: Array,
+    targets: Array,
+    latents: Array,
+    loss_weights: Array,
 ):
     model = eqx.combine(diff_model, static_model)
-    predicted_cs = model._compute_coeff_predictions_batched(model.G, x_t)
-    predicted_cs = model.predict_next_state(x_t, c_t, predicted_cs)
-    x_t = x_t.reshape(100, 20, -1)
+    predicted_cs = model._compute_coeff_predictions_batched(model.G, latents)
+    predicted_cs = model.combine_operator_predictions(latents, coeffs, predicted_cs)
 
-    weights = jnp.linalg.norm(jnp.diff(x_t, axis=1), axis=-1) ** 2
+    return (loss_weights * l2_loss(predicted_cs, targets).sum(axis=-1)).sum()
+
+
+@eqx.filter_jit
+def recon_loss_diff_batched(
+    diff_model: HierarchicalDecomposedDynamics,
+    static_model: HierarchicalDecomposedDynamics,
+    coeffs: Array,
+    targets: Array,
+    latents: Array,
+):
+    loss = vmap(recon_loss_diff, in_axes=(None, None, 0, 0, 0, 0))
+    weights = jnp.linalg.norm(jnp.diff(latents, axis=1), axis=-1) ** 2
     weights = jnp.hstack((weights, jnp.expand_dims(weights[:, -1], axis=1)))
     weights = weights / weights.sum()
+    recon_loss = loss(
+        diff_model,
+        static_model,
+        coeffs,
+        targets,
+        latents,
+        weights,
+    )
 
-    return (weights.flatten() * l2_loss(predicted_cs, target_c_t).sum(axis=-1)).sum()
+    return recon_loss.sum()
 
 
-recon_loss_value_and_grad = eqx.filter_jit(eqx.filter_value_and_grad(recon_loss_diff))
+recon_loss_value_and_grad = eqx.filter_jit(
+    eqx.filter_value_and_grad(recon_loss_diff_batched)
+)
