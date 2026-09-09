@@ -22,6 +22,7 @@ from decomposed_dynamics.dynamics_models import (
     DecomposedLinearDynamics,
     HierarchicalDecomposedDynamics,
 )
+from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit_no_obs
 from decomposed_dynamics.inference import bpdn_df_inference_no_obs
@@ -94,7 +95,7 @@ def parse_args(argv: list):
 
 
 def plot_MLP_flow_field(
-    model: HierarchicalDecomposedDynamics,
+    model: DecomposedDynamicsModel,
     mlp_ind: int,
     start: float,
     stop: float,
@@ -180,32 +181,49 @@ def simulate_ring_attractor(args, keys):
     return simulation, trajectories
 
 
+def load_dlds_coeffs(dlds_model, model_path, coeffs_path):
+    if os.path.exists(model_path) and os.path.exists(coeffs_path):
+        model_fit = eqx.tree_deserialise_leaves(model_path, dlds_model)
+        dlds_coeffs = jnp.load(coeffs_path)
+
+        return model_fit, dlds_coeffs
+    else:
+        return None, None
+
+
 def fit_infer_hierarchical_model_all_stages(
     model: HierarchicalDecomposedDynamics,
     trajectory_dict,
     trajectories,
 ):
-    inference_hyperparams = NoObsInferenceHyperparams(l1_coeff=0.7)
-    model_fit = fit_no_obs(
-        trajectory_dict,
-        model.primitives,
-        samples_per_snippet=60,
-        num_snippets=50,
-        max_iter=100,
-        lr_init=1,
-        inference_hyperparams=inference_hyperparams,
-        model_update_hyperparams=model.initialize_hyperparams(
-            decorr_coeff=0.005, l1_coeff=0.01
-        ).primitive_hyperparams,
-    )
+    model_path = "results/ring_attractor/dlds_model.eqx"
+    coeffs_path = "results/ring_attractor/dlds_coeffs.npy"
+    model_fit, dlds_coeffs = load_dlds_coeffs(model.primitives, model_path, coeffs_path)
 
-    dlds_coeffs = bpdn_df_inference_no_obs(
-        model_fit,
-        model_fit.compute_operator_flows,
-        trajectories[:, :-1, :],
-        trajectories[:, 1:, :],
-        inference_hyperparams,
-    )
+    if model_fit is None:
+        inference_hyperparams = NoObsInferenceHyperparams(l1_coeff=0.7)
+        model_fit = fit_no_obs(
+            trajectory_dict,
+            model.primitives,
+            samples_per_snippet=60,
+            num_snippets=50,
+            max_iter=100,
+            lr_init=1,
+            inference_hyperparams=inference_hyperparams,
+            model_update_hyperparams=model.initialize_hyperparams(
+                decorr_coeff=0.005, l1_coeff=0.01
+            ).primitive_hyperparams,
+        )
+        dlds_coeffs = bpdn_df_inference_no_obs(
+            model_fit,
+            model_fit.compute_operator_flows,
+            trajectories[:, :-1, :],
+            trajectories[:, 1:, :],
+            inference_hyperparams,
+        )
+
+        eqx.tree_serialise_leaves(model_path, model_fit)
+        jnp.save(coeffs_path, dlds_coeffs)
 
     # fit hierarchical to coefficients
     model = eqx.tree_at(lambda model: model.primitives, model, model_fit)
