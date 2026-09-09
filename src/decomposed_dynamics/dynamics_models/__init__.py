@@ -16,3 +16,7 @@ from decomposed_dynamics.dynamics_models.linear import (
     DecomposedLinearDynamics,
     LinearOperatorHyperparams,
 )
+from decomposed_dynamics.dynamics_models.mlp import (
+    MLPDecomposedDynamics,
+    MLPOperatorHyperparams,
+)
