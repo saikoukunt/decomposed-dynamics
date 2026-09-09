@@ -46,7 +46,9 @@ def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Arra
 
 @jit
 def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Array:
-    return l1_coeff / (1 + reweight_coeff * jnp.abs(x))
+    return l1_coeff[jnp.newaxis, :] / (
+        1 + reweight_coeff[jnp.newaxis, :] * jnp.abs(x)[:, jnp.newaxis]
+    )
 
 
 @jit
@@ -128,7 +130,9 @@ def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -
     return tree_util.tree_map(prox, x)
 
 
-def prox_l1_binary(x: Any, l1_coeff, scaling: float = 1.0, _lambda=0) -> Any:
+def prox_l1_binary(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any:
+    l1_coeff = hyperparams_prox[..., 0]
+    _lambda = hyperparams_prox[..., 1]
     x = prox_non_negative_lasso(x, l1_coeff, scaling)
     x = prox_binary(x, _lambda, scaling)
 

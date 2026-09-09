@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -90,12 +92,16 @@ def fit_no_obs(
     samples_per_snippet: int,
     num_snippets: int,
     lr_init: float = 10.0,
+    lr_end: None | float = None,
     lr_decay: float = 0.9995,
     max_iter: int = 200,
     model_update_hyperparams: dict | OperatorHyperparams = {},
     inference_hyperparams: dict | NoObsInferenceHyperparams = {},
     filter_spec=None,
+    hyperparams_prox_end: None | float = None,
 ) -> DecomposedDynamicsModel:
+
+    # TODO: wrap parameter initialization into a function
     if type(model_update_hyperparams) is dict:
         model_update_hyperparams = dynamics_model.initialize_hyperparams(
             **model_update_hyperparams
@@ -107,11 +113,29 @@ def fit_no_obs(
     if filter_spec is None:
         filter_spec = jax.tree_util.tree_map(lambda _: True, dynamics_model)
 
-    lr = lr_init
+    if lr_end is None:
+        lr_end = lr_init
+    lr = jnp.linspace(lr_init, lr_end, max_iter)
+
+    if hyperparams_prox_end is None:
+        hyperparams_prox_end = inference_hyperparams.l1_coeff
+    hyperparams_prox = jnp.linspace(
+        inference_hyperparams.l1_coeff, hyperparams_prox_end, int(max_iter / 2)
+    )
+
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
+
+        if i < max_iter / 2:
+            inference_hyperparams = replace(
+                inference_hyperparams, l1_coeff=hyperparams_prox[i]
+            )
+        else:
+            inference_hyperparams = replace(
+                inference_hyperparams, l1_coeff=hyperparams_prox[-1]
+            )
 
         operator_coeffs = bpdn_df_inference_no_obs(
             dynamics_model,
@@ -130,7 +154,7 @@ def fit_no_obs(
         updated_model, delta_model = update_dynamics_model(
             dynamics_model,
             dynamics_recon_grads,
-            lr,
+            lr[i],
             model_update_hyperparams,
         )
 
@@ -139,7 +163,6 @@ def fit_no_obs(
         progress_bar.set_postfix_str(delta_str)
 
         dynamics_model = updated_model
-        lr *= lr_decay
 
     return dynamics_model
 
