@@ -1,10 +1,13 @@
 from typing import Any, Optional
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, tree_util
 from jaxopt.prox import prox_non_negative_lasso
+
+from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 
 
 def extract_snippets(
@@ -44,11 +47,11 @@ def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Arra
     return x
 
 
+# WARN: this means x can't be 1D
 @jit
 def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Array:
-    return l1_coeff[jnp.newaxis, :] / (
-        1 + reweight_coeff[jnp.newaxis, :] * jnp.abs(x)[:, jnp.newaxis]
-    )
+    denominator = 1 + reweight_coeff[jnp.newaxis, ...] * jnp.abs(x)[..., jnp.newaxis]
+    return jnp.squeeze(l1_coeff[jnp.newaxis, ...] / denominator)
 
 
 @jit
@@ -60,6 +63,25 @@ def spectral_normalize(F: Array):
 def operator_correlation(F: Array) -> Array:
     pairwise_corrs = jnp.einsum("kij, lij -> kl", F, F)
     return jnp.sum(jnp.triu(pairwise_corrs**2, k=1))
+
+
+@eqx.filter_jit
+def operator_flow_correlation(
+    model: DecomposedDynamicsModel, locations: Array
+) -> Array:
+    locations = locations.reshape(-1, model.num_latents)
+    predictions = model.compute_operator_predictions(locations)
+    flows = predictions - locations[..., jnp.newaxis, :]
+    flows = flows.transpose(1, 0, 2)
+
+    # flows = flows / (jnp.linalg.norm(flows, axis=-1, keepdims=True) + 1e-8)
+    flows = flows.reshape(model.num_operators, -1)
+    flows = flows / (jnp.linalg.norm(flows, axis=-1, keepdims=True) + 1e-8)
+    pairwise_corrs = jnp.einsum("in, jn -> ij", flows, flows)
+
+    num_entries = model.num_operators * (model.num_operators - 1) / 2
+
+    return jnp.sum(jnp.triu(jnp.clip(pairwise_corrs, 0.0) ** 2, k=1)) / num_entries
 
 
 def repackage_C_hat(C_hat, trial_ids):
