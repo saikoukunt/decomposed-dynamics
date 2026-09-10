@@ -24,6 +24,7 @@ def fit_hierarchical_mlps(
     samples_per_snippet: int,
     num_snippets: int,
     lr_init: float,
+    lr_end: float,
     filter_spec: HierarchicalDecomposedDynamics,
     max_iter: int = 200,
     inference_hyperparams: dict | NoObsInferenceHyperparams = {},
@@ -32,9 +33,9 @@ def fit_hierarchical_mlps(
 
     progress_bar = trange(max_iter)
 
-    lr = jnp.linspace(1e-4, lr_init, max_iter)[::-1]
+    lr = jnp.linspace(lr_init, lr_end, max_iter)
     prox_coeffs = jnp.linspace(
-        inference_hyperparams.l1_coeff, prox_coeff_max, int(max_iter / 2)
+        inference_hyperparams.l1_coeff, jnp.array(prox_coeff_max), int(max_iter / 2)
     )
 
     for i in progress_bar:

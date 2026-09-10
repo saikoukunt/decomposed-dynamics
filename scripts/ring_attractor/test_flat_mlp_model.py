@@ -36,9 +36,10 @@ def main():
         num_operators=6, num_latents=2, key=keys[3], layer_width=20, num_hidden_layers=4
     )
     inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=jnp.array([0.1, 0.4]),
+        l1_coeff=jnp.array([0.2, 0.1]),
         prox=prox_l1_binary,
-        l1_reweight_coeff=jnp.array([0.0, 0.0]),
+        l1_reweight_coeff=jnp.array([200, 0.0]),
+        smooth_coeff=0,
     )
     model = fit_no_obs(
         trajectory_dict,
@@ -49,17 +50,18 @@ def main():
         lr_init=1,
         lr_end=1e-4,
         inference_hyperparams=inference_hyperparams,
-        hyperparams_prox_end=jnp.array([0.1, 0.4]),
+        model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.0),
+        hyperparams_prox_end=jnp.array([0.7, 0.4]),
     )
     inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=jnp.array([0.1, 0.4]),
+        l1_coeff=jnp.array([0.7, 0.4]),
         prox=prox_l1_binary,
-        l1_reweight_coeff=jnp.array([0.0, 0.0]),
+        l1_reweight_coeff=jnp.array([200, 0.0]),
     )
 
     mlp_coeffs = bpdn_df_inference_no_obs(
         model,
-        model.compute_operator_flows,
+        model.compute_operator_predictions,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,
@@ -97,5 +99,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # jax.disable_jit(disable=True)
     with jax.default_device(jax.devices("cpu")[0]):
         main()
