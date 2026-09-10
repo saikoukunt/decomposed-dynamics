@@ -29,11 +29,13 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @abstractmethod
-    def compute_operator_flows(self, x: Array) -> Array:
+    def compute_operator_predictions(self, x: Array) -> Array:
         raise NotImplementedError
 
     @abstractmethod
-    def regularize_operators(self, hyperparams: OperatorHyperparams, **kwargs) -> Self:
+    def regularize_operators(
+        self, latents: Array, hyperparams: OperatorHyperparams, **kwargs
+    ) -> Self:
         raise NotImplementedError
 
     @eqx.filter_jit

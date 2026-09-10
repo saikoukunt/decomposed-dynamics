@@ -52,7 +52,7 @@ def fit(
         latents, operator_coeffs = bpdn_df_inference(
             observation_model,
             dynamics_model,
-            dynamics_model.compute_operator_flows,
+            dynamics_model.compute_operator_predictions,
             observations,
             inference_hyperparams,
         )
@@ -139,7 +139,7 @@ def fit_no_obs(
 
         operator_coeffs = bpdn_df_inference_no_obs(
             dynamics_model,
-            dynamics_model.compute_operator_flows,
+            dynamics_model.compute_operator_predictions,
             latents[:, :-1, :],
             latents[:, 1:, :],
             inference_hyperparams,
@@ -156,6 +156,7 @@ def fit_no_obs(
             dynamics_recon_grads,
             lr[i],
             model_update_hyperparams,
+            latents,
         )
 
         delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
@@ -192,11 +193,12 @@ def update_dynamics_model(
     grads,
     lr,
     hyperparams: OperatorHyperparams,
+    latents: Array,
 ):
 
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(dynamics_model, grad_updates)
-    updated_model = updated_model.regularize_operators(hyperparams)
+    updated_model = updated_model.regularize_operators(hyperparams, latents)
 
     delta_params = jax.tree.map(
         lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
@@ -225,7 +227,7 @@ def compute_dynamics_recon_loss_sequence(
     latents: Array,
     operator_coeffs: Array,
 ):
-    flows = dynamics_model.compute_operator_flows(latents[:-1, :])
+    flows = dynamics_model.compute_operator_predictions(latents[:-1, :])
     predictions = dynamics_model.combine_operator_predictions(
         latents[:-1, :], operator_coeffs, flows
     )

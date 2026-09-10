@@ -88,8 +88,8 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
         return HierarchicalOperatorHyperparams(primitive_hyperparams)
 
     @override
-    def compute_operator_flows(self, x: Array) -> Array:
-        primitive_flows = self.primitives.compute_operator_flows(x)
+    def compute_operator_predictions(self, x: Array) -> Array:
+        primitive_flows = self.primitives.compute_operator_predictions(x)
         primitive_coeffs = jnp.squeeze(
             self._compute_coeff_predictions_batched(
                 self.G, x.reshape(-1, self.num_latents)

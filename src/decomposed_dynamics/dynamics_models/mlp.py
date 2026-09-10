@@ -15,7 +15,7 @@ from decomposed_dynamics.dynamics_models.base import (
 
 @dataclass(frozen=True)
 class MLPOperatorHyperparams(OperatorHyperparams):
-    pass
+    decorr_coeff: Array = 0.01
 
 
 class MLPDecomposedDynamics(DecomposedDynamicsModel):
@@ -71,33 +71,43 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
         )
 
     @override
-    def compute_operator_flows(self, x: Array) -> Array:
-        flows = self._compute_operator_flows_batched(
+    def compute_operator_predictions(self, x: Array) -> Array:
+        flows = self._compute_operator_predictions_batched(
             self.G, x.reshape(-1, self.num_latents)
         )
         return jnp.squeeze(flows)
 
     @eqx.filter_vmap(in_axes=(None, eqx.if_array(0), None))
-    def _compute_operator_flows(self, G: eqx.nn.MLP, x: Array) -> Array:
+    def _compute_operator_predictions(self, G: eqx.nn.MLP, x: Array) -> Array:
         return G(x)
 
-    _compute_operator_flows_batched = eqx.filter_vmap(
-        _compute_operator_flows, in_axes=(None, None, 0)
+    _compute_operator_predictions_batched = eqx.filter_vmap(
+        _compute_operator_predictions, in_axes=(None, None, 0)
     )
 
     @override
     def initialize_hyperparams(self, **kwargs) -> OperatorHyperparams:
-        return MLPOperatorHyperparams()
+        return MLPOperatorHyperparams(**kwargs)
 
     @override
     @eqx.filter_jit
-    def regularize_operators(self, hyperparams: MLPOperatorHyperparams) -> Self:
-        return self
+    def regularize_operators(
+        self, hyperparams: MLPOperatorHyperparams, latents: Array
+    ) -> Self:
+        updated_model = self.decorrelate_operators(latents, hyperparams.decorr_coeff)
+
+        return updated_model
 
     @eqx.filter_jit
     def apply_prox(self, **kwargs) -> eqx.nn.MLP:
         return self.G
 
     @eqx.filter_jit
-    def decorrelate_operators(self) -> eqx.nn.MLP:
-        return self.G
+    def decorrelate_operators(self, latents: Array, decorr_coeff: float) -> Self:
+        from decomposed_dynamics.utils import operator_flow_correlation
+
+        decorr_gradient = eqx.filter_grad(operator_flow_correlation)(self, latents)
+        grad_updates = jax.tree.map(lambda grad: -decorr_coeff * grad, decorr_gradient)
+        updated_model = eqx.apply_updates(self, grad_updates)
+
+        return updated_model

@@ -41,12 +41,14 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         return AffineOperatorHyperparams(**kwargs)
 
     @eqx.filter_jit
-    def compute_operator_flows(self, x: Array) -> Array:
+    def compute_operator_predictions(self, x: Array) -> Array:
         offsets = x[..., None, :] - self.b
         return jnp.einsum("kij, ...kj -> ...ki", self.F, offsets) + self.b
 
     @eqx.filter_jit
-    def regularize_operators(self, hyperparams: AffineOperatorHyperparams) -> Self:
+    def regularize_operators(
+        self, latents: Array, hyperparams: AffineOperatorHyperparams
+    ) -> Self:
         F, b = self.apply_prox(
             self.F,
             self.b,
