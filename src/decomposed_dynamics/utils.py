@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, tree_util
-from jaxopt.prox import prox_non_negative_lasso
+from jaxopt.prox import prox_lasso, prox_non_negative_lasso
 
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 
@@ -157,5 +157,45 @@ def prox_l1_binary(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any
     _lambda = hyperparams_prox[..., 1]
     x = prox_non_negative_lasso(x, l1_coeff, scaling)
     x = prox_binary(x, _lambda, scaling)
+
+    return x
+
+
+def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
+    lam = _lambda * scaling
+    n_iter = 30
+    L = 4.0
+
+    def D(u):
+        return jnp.diff(u, axis=0)
+
+    def DT(p):
+        return jnp.concatenate([-p[:1, :], p[:-1, :] - p[1:, :], p[-1:, :]], axis=0)
+
+    def project_on_C(u):
+        return jnp.clip(u, 0.0, 1.0)
+
+    def project_on_P(p):
+        return jnp.clip(p, -lam, lam)
+
+    p_0 = jnp.zeros((x.shape[0] - 1, x.shape[1]))
+
+    def body(_, state):
+        p_prev, r, t = state
+        p = project_on_P(r + 1 / L * D(project_on_C(x - DT(r))))
+        t_next = 0.5 * (1 + jnp.sqrt(1 + 4 * t**2))
+        r = p + ((t - 1) / t_next) * (p - p_prev)
+        return p, r, t_next
+
+    p, _, _ = jax.lax.fori_loop(0, n_iter, body, (p_0, p_0, 1.0))
+
+    return project_on_C(x - DT(p))
+
+
+def prox_l1_unit_tv(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any:
+    l1_coeff = hyperparams_prox[..., 0]
+    _lambda = hyperparams_prox[..., 1]
+    x = prox_unit_tv(x, _lambda, scaling)
+    x = prox_lasso(x, l1_coeff, scaling)
 
     return x
