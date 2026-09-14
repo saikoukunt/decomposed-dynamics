@@ -12,11 +12,6 @@ from decomposed_dynamics.dynamics_models.base import (
     DeltaDynamics,
 )
 from decomposed_dynamics.dynamics_models.linear import LinearOperatorHyperparams
-from decomposed_dynamics.utils import (
-    operator_correlation,
-    reweighted_l1_prox,
-    spectral_normalize,
-)
 
 
 @dataclass(frozen=True)
@@ -29,11 +24,12 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
     b: Array
 
     def initialize_params(self, key: Array):
+        from decomposed_dynamics.utils import spectral_normalize
+
         key, subkey = jr.split(key)
 
         F = jr.normal(key, (self.num_operators, self.num_latents, self.num_latents))
         self.F = spectral_normalize(F)
-
         self.b = jr.normal(subkey, (self.num_operators, self.num_latents))
 
     @staticmethod
@@ -70,6 +66,8 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         l1_reweight_coeff: float,
         b_l1_coeff: float,
     ) -> tuple[Array, Array]:
+        from decomposed_dynamics.utils import reweighted_l1_prox, spectral_normalize
+
         F = spectral_normalize(F)
         F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
 
@@ -79,6 +77,8 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
 
     @eqx.filter_jit
     def decorrelate_operators(self, F: Array, operator_decorr_coeff: float) -> Array:
+        from decomposed_dynamics.utils import operator_correlation
+
         decorr_gradient = grad(operator_correlation)(F)
         F = F - operator_decorr_coeff * decorr_gradient
 
