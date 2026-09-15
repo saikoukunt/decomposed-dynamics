@@ -28,7 +28,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
         self,
         num_nonlinear_operators: int,
         num_primitives: int,
-        num_latents: int,
+        state_dim: int,
         primitive_type: type[DecomposedDynamicsModel],
         key: Array,
         layer_width: int = 5,
@@ -40,7 +40,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
         self.primitive_type = primitive_type
         super().__init__(
             num_nonlinear_operators,
-            num_latents,
+            state_dim,
             key,
             layer_width=layer_width,
             num_hidden_layers=num_hidden_layers,
@@ -58,7 +58,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
     ):
         keys = jr.split(key, self.num_operators + 1)
         self.primitives = self.primitive_type(
-            self.num_primitives, self.num_latents, keys[0], **primitive_kwargs
+            self.num_primitives, self.state_dim, keys[0], **primitive_kwargs
         )
         self.G = self.initialize_mlps(
             keys[1:], layer_width, num_hidden_layers, activation_fn
@@ -73,7 +73,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
         activation_fn: Callable,
     ):
         return eqx.nn.MLP(
-            self.num_latents,
+            self.state_dim,
             self.num_primitives,
             width_size=layer_width,
             depth=num_hidden_layers,
@@ -92,7 +92,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
         primitive_flows = self.primitives.compute_operator_predictions(x)
         primitive_coeffs = jnp.squeeze(
             self._compute_coeff_predictions_batched(
-                self.G, x.reshape(-1, self.num_latents)
+                self.G, x.reshape(-1, self.state_dim)
             )
         )
 

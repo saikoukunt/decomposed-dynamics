@@ -24,7 +24,7 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
     def __init__(
         self,
         num_operators: int,
-        num_latents: int,
+        state_dim: int,
         key: Array,
         layer_width: int = 5,
         num_hidden_layers: int = 2,
@@ -32,7 +32,7 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
     ):
         super().__init__(
             num_operators,
-            num_latents,
+            state_dim,
             key,
             layer_width=layer_width,
             num_hidden_layers=num_hidden_layers,
@@ -62,8 +62,8 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
         activation_fn: Callable,
     ):
         return eqx.nn.MLP(
-            self.num_latents,
-            self.num_latents,
+            self.state_dim,
+            self.state_dim,
             width_size=layer_width,
             depth=num_hidden_layers,
             activation=activation_fn,
@@ -73,7 +73,7 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
     @override
     def compute_operator_predictions(self, x: Array) -> Array:
         flows = self._compute_operator_predictions_batched(
-            self.G, x.reshape(-1, self.num_latents)
+            self.G, x.reshape(-1, self.state_dim)
         )
         return jnp.squeeze(flows)
 

@@ -28,9 +28,9 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
 
         key, subkey = jr.split(key)
 
-        F = jr.normal(key, (self.num_operators, self.num_latents, self.num_latents))
+        F = jr.normal(key, (self.num_operators, self.state_dim, self.state_dim))
         self.F = spectral_normalize(F)
-        self.b = jr.normal(subkey, (self.num_operators, self.num_latents))
+        self.b = jr.normal(subkey, (self.num_operators, self.state_dim))
 
     @staticmethod
     def initialize_hyperparams(**kwargs) -> AffineOperatorHyperparams:

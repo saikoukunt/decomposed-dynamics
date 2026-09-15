@@ -29,7 +29,7 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
     def initialize_params(self, key: Array):
         from decomposed_dynamics.utils import spectral_normalize
 
-        F = jr.normal(key, (self.num_operators, self.num_latents, self.num_latents))
+        F = jr.normal(key, (self.num_operators, self.state_dim, self.state_dim))
         self.F = spectral_normalize(F)
 
     @staticmethod

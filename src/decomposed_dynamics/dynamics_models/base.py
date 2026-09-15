@@ -12,11 +12,11 @@ class OperatorHyperparams(ABC):
 
 class DecomposedDynamicsModel(eqx.Module):
     num_operators: int
-    num_latents: int
+    state_dim: int
 
-    def __init__(self, num_operators: int, num_latents: int, key: Array, **init_kwargs):
+    def __init__(self, num_operators: int, state_dim: int, key: Array, **init_kwargs):
         self.num_operators = num_operators
-        self.num_latents = num_latents
+        self.state_dim = state_dim
         self.initialize_params(key, **init_kwargs)
 
     @abstractmethod

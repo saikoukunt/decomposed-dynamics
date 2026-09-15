@@ -24,7 +24,7 @@ if __name__ == "__main__":
         X, C, F = simulate_two_subsystems_no_obs(3000, [4, 4], [3, 3], 50, seed=seed)
 
         key = jr.key(seed)
-        model = DecomposedAffineDynamics(num_operators=15, num_latents=8, key=key)
+        model = DecomposedAffineDynamics(num_operators=15, state_dim=8, key=key)
         model = fit_no_obs(X, model, 200, 20, max_iter=200)
         plot_Fs(F)
         plot_Fs(model.F)
