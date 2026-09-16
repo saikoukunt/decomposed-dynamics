@@ -19,11 +19,12 @@ from datetime import datetime
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 
-    output_dir = f"../outputs/belief_transformer_trainlen25_v3_norm75"
+    output_dir = f"../outputs/belief_transformer_switching"
     os.makedirs(output_dir, exist_ok=True)
 
-    folderName = "/home/yejz1/workspace/jhu/transformer_belief/outputs/train_seqlen25_v2/activations"
-    allFiles = sorted(f for f in os.listdir(folderName) if f.endswith(".npy"))
+    folderName = "/home/yejz1/workspace/jhu/belief-transformer/outputs/transformer_switching/run_seqlen10_20260916150037"
+    # folderName = "/home/yejz1/workspace/jhu/archive/transformer_belief/outputs/train_seqlen10/activations"
+    allFiles = sorted(f for f in os.listdir(folderName) if f.startswith("activations") and f.endswith(".npy"))
     print(allFiles)
     transformerAct     = {}
     trial_ids  = np.array([])
@@ -72,8 +73,8 @@ if __name__ == "__main__":
             F_lr_init=.1, 
             c_l1_coeff=c_l1, 
             c_smooth_coeff=c_smooth, 
-            F_l1_coeff=0.001,
-            F_decorr_coeff=0.0
+            F_l1_coeff=0.00,
+            F_decorr_coeff=0.01
         )
     with jax.default_device(jax.devices("cpu")[0]):
         C_hat = infer_no_obs_state_all_trials(transformerAct, F_hat, c_l1_coeff=c_l1, c_smooth_coeff=c_smooth)

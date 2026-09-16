@@ -2,6 +2,7 @@ import functools
 
 import jax
 import jax.numpy as jnp
+import numpy.typing as npt
 from tqdm import tqdm
 from jax import Array, grad, jit, lax, vmap
 from jaxopt import ProximalGradient
@@ -30,6 +31,7 @@ def fit_no_obs(
     F_lr_decay: float = 0.99995,
     F_decorr_coeff: float = 0.05,
     F_l1_coeff: float = 0.03,
+    trial_probs: npt.NDArray = None,
 ):
     trial_keys = list(data.keys())
     num_latents = data[trial_keys[0]].shape[0]
@@ -42,7 +44,13 @@ def fit_no_obs(
     F_lr = F_lr_init
     pbar = trange(max_iter)
     for i in pbar:
-        X, _ = extract_snippets(data, num_snippets, num_timepoints, seed=i)
+        X, _ = extract_snippets(
+            data, 
+            num_snippets, 
+            num_timepoints, 
+            seed=i, 
+            trial_probabilities=trial_probs
+        )
 
         C = infer_no_obs_state(
             X,

@@ -43,7 +43,11 @@ def extract_one_snippet(
 
 
 def extract_snippets(
-    trial_data: npt.NDArray, num_snippets: int, samples_per_snippet: int, seed: int
+    trial_data: npt.NDArray, 
+    num_snippets: int, 
+    samples_per_snippet: int, 
+    seed: int,
+    trial_probabilities: npt.NDArray | None = None
 ) -> tuple[Array, Array]:
     rng = np.random.default_rng(seed)
     snippet_seeds = rng.integers(num_snippets,size=num_snippets)
@@ -55,7 +59,11 @@ def extract_snippets(
 
     snippets = np.zeros((num_snippets, observation_dim, snippet_length))
     snippet_times = np.zeros((num_snippets, 2), dtype=np.int32)
-    trial_inds = rng.choice(num_trials, num_snippets)
+
+    if trial_probabilities is not None:
+        trial_inds = rng.choice(num_trials, size=num_snippets, p=trial_probabilities)
+    else:
+        trial_inds = rng.choice(num_trials, size=num_snippets)
 
     for i, trial_ind in enumerate(trial_inds):
         snippets[i], snippet_times[i] = extract_one_snippet(
