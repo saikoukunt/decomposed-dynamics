@@ -3,7 +3,7 @@ from typing import Self
 
 import equinox as eqx
 import jax.numpy as jnp
-from jax import Array, jit
+from jax import Array
 
 
 class OperatorHyperparams(ABC):
@@ -41,14 +41,3 @@ class DecomposedDynamicsModel(eqx.Module):
     @eqx.filter_jit
     def combine_operator_predictions(self, c: Array, flows: Array) -> Array:
         return jnp.einsum("...k, ...ki -> ...i", c, flows)
-
-
-class DeltaDynamics(eqx.Module):
-    dt: float
-
-    def __init__(self, dt):
-        self.dt = dt
-
-    @jit
-    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
-        return x + self.dt * jnp.einsum("...k, ...ki -> ...i", c, flows)

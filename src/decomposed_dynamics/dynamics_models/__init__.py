@@ -1,6 +1,5 @@
 from decomposed_dynamics.dynamics_models.affine import (
     AffineOperatorHyperparams,
-    DecomposedAffineDeltaDynamics,
     DecomposedAffineDynamics,
 )
 from decomposed_dynamics.dynamics_models.base import (
@@ -12,7 +11,6 @@ from decomposed_dynamics.dynamics_models.hierarchical import (
     HierarchicalOperatorHyperparams,
 )
 from decomposed_dynamics.dynamics_models.linear import (
-    DecomposedLinearDeltaDynamics,
     DecomposedLinearDynamics,
     LinearOperatorHyperparams,
 )
