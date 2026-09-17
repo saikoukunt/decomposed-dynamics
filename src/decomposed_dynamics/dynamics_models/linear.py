@@ -11,6 +11,11 @@ from decomposed_dynamics.dynamics_models.base import (
     DeltaDynamics,
     OperatorHyperparams,
 )
+from decomposed_dynamics.dynamics_models.regularization import (
+    operator_correlation,
+    spectral_normalize,
+)
+from decomposed_dynamics.proximal_operators import reweighted_l1_prox
 
 
 @dataclass(frozen=True)
@@ -27,8 +32,6 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
         super().__init__(num_operators, num_latents, key)
 
     def initialize_params(self, key: Array):
-        from decomposed_dynamics.utils import spectral_normalize
-
         F = jr.normal(key, (self.num_operators, self.state_dim, self.state_dim))
         self.F = spectral_normalize(F)
 
@@ -62,8 +65,6 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
         l1_coeff: float,
         l1_reweight_coeff: float,
     ) -> Array:
-        from decomposed_dynamics.utils import reweighted_l1_prox, spectral_normalize
-
         F = spectral_normalize(F)
         F = reweighted_l1_prox(F, l1_coeff, l1_reweight_coeff)
 
@@ -71,7 +72,7 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
 
     # @eqx.filter_jit
     # def decorrelate_operators(self, latents: Array, decorr_coeff: float) -> Self:
-    #     from decomposed_dynamics.utils import operator_flow_correlation
+    #     from decomposed_dynamics.dynamics_models.regularization import operator_flow_correlation
     #
     #     decorr_gradient = eqx.filter_grad(operator_flow_correlation)(self, latents)
     #     grad_updates = jax.tree.map(lambda grad: -decorr_coeff * grad, decorr_gradient)
@@ -81,8 +82,6 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
     #
     @eqx.filter_jit
     def decorrelate_operators(self, F: Array, operator_decorr_coeff: float) -> Array:
-        from decomposed_dynamics.utils import operator_correlation
-
         decorr_gradient = grad(operator_correlation)(F)
         F = F - operator_decorr_coeff * decorr_gradient
 

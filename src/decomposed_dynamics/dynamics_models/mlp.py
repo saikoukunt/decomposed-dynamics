@@ -11,6 +11,7 @@ from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
     OperatorHyperparams,
 )
+from decomposed_dynamics.dynamics_models.regularization import operator_flow_correlation
 
 
 @dataclass(frozen=True)
@@ -104,8 +105,6 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
 
     @eqx.filter_jit
     def decorrelate_operators(self, latents: Array, decorr_coeff: float) -> Self:
-        from decomposed_dynamics.utils import operator_flow_correlation
-
         decorr_gradient = eqx.filter_grad(operator_flow_correlation)(self, latents)
         grad_updates = jax.tree.map(lambda grad: -decorr_coeff * grad, decorr_gradient)
         updated_model = eqx.apply_updates(self, grad_updates)
