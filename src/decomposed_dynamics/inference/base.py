@@ -17,6 +17,12 @@ class InferenceHyperparams(eqx.Module):
     tol: float = 1e-4
     dynamics_loss_coeff: Array = eqx.field(default=0.0, converter=jnp.array)
 
+    @classmethod
+    def get_backend(
+        cls, observation_model: ObservationModel | None = None
+    ) -> "InferenceBackend | NoObsInferenceBackend":
+        raise NotImplementedError
+
 
 def _prox_coeffs_only(prox: Callable, num_latents: int) -> Callable:
     """Apply `prox` to the operator coefficients of a `[latents, coeffs]` state only."""
@@ -109,7 +115,7 @@ class InferenceBackend(ABC):
 
         return (
             state[..., : dynamics_model.state_dim],
-            state[..., dynamics_model.state_dim :],
+            state[..., 1:, dynamics_model.state_dim :],
         )
 
     @abstractmethod

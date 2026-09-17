@@ -13,11 +13,23 @@ from decomposed_dynamics.inference.base import (
     NoObsInferenceBackend,
 )
 from decomposed_dynamics.loss_functions import normalized_dynamics_reconstruction_loss
+from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.proximal_operators import prox_l1_unit_tv
 
 
 class FusedLassoHyperparams(InferenceHyperparams):
     prox_hyperparams: Array = eqx.field(default=(0.25, 0.25), converter=jnp.array)
+
+    @override
+    @classmethod
+    def get_backend(
+        cls, observation_model: ObservationModel | None = None
+    ) -> "FusedLassoNoObsInference":
+        if observation_model is not None:
+            raise NotImplementedError(
+                "fused lasso has no observation model backend"
+            )
+        return FusedLassoNoObsInference()
 
 
 @dataclass(frozen=True)

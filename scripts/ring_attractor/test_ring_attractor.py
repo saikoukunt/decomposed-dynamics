@@ -23,7 +23,7 @@ from decomposed_dynamics.dynamics_models import (
 )
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
-from decomposed_dynamics.fitting import fit_no_obs
+from decomposed_dynamics.fitting import fit
 from decomposed_dynamics.inference import BPDNDFHyperparams
 from decomposed_dynamics.inference.bpdn import BPDNDFNoObsInference
 from decomposed_dynamics.proximal_operators import prox_l1_binary
@@ -203,7 +203,7 @@ def fit_infer_hierarchical_model_all_stages(
 
     if model_fit is None:
         inference_hyperparams = BPDNDFHyperparams(prox_hyperparams=0.7)
-        model_fit = fit_no_obs(
+        _, model_fit = fit(
             trajectory_dict,
             model.primitives,
             samples_per_snippet=60,

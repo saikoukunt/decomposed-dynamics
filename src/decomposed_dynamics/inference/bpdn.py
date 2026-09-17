@@ -29,6 +29,13 @@ class BPDNDFHyperparams(InferenceHyperparams):
     prox_reweight_coeff: Array = eqx.field(default=200.0, converter=jnp.array)
     smooth_coeff: Array = eqx.field(default=0.4, converter=jnp.array)
 
+    @override
+    @classmethod
+    def get_backend(
+        cls, observation_model: ObservationModel | None = None
+    ) -> "BPDNDFInference | BPDNDFNoObsInference":
+        return BPDNDFNoObsInference() if observation_model is None else BPDNDFInference()
+
 
 @dataclass(frozen=True)
 class BPDNDFNoObsInference(NoObsInferenceBackend):

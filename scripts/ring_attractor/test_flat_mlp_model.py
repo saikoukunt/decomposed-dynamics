@@ -7,7 +7,7 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 
 from decomposed_dynamics.dynamics_models import MLPDecomposedDynamics
-from decomposed_dynamics.fitting import fit_no_obs
+from decomposed_dynamics.fitting import fit
 from decomposed_dynamics.inference import BPDNDFHyperparams, BPDNDFNoObsInference
 from decomposed_dynamics.proximal_operators import prox_l1_binary
 
@@ -34,13 +34,13 @@ def main():
     model = MLPDecomposedDynamics(
         num_operators=6, state_dim=2, key=keys[3], layer_width=20, num_hidden_layers=4
     )
-    inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=jnp.array([0.7, 0.4]),
-        prox=prox_l1_binary,
-        l1_reweight_coeff=jnp.array([200, 0.0]),
+    inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
+    inference_hyperparams = BPDNDFHyperparams(
+        prox_hyperparams=jnp.array([0.7, 0.4]),
+        prox_reweight_coeff=jnp.array([200, 0.0]),
         smooth_coeff=0,
     )
-    model = fit_no_obs(
+    _, model = fit(
         trajectory_dict,
         model,
         samples_per_snippet=20,
@@ -48,11 +48,11 @@ def main():
         max_iter=2000,
         lr_init=1,
         lr_end=1e-4,
+        inference_backend=inference_backend,
         inference_hyperparams=inference_hyperparams,
         model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.0),
         prox_hyperparams_end=jnp.array([0.7, 0.4]),
     )
-    inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
     inference_hyperparams = BPDNDFHyperparams(
         prox_hyperparams=jnp.array([0.7, 0.4]),
         prox_reweight_coeff=jnp.array([200, 0.0]),
@@ -63,6 +63,7 @@ def main():
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,
+        model.compute_operator_predictions,
     )
     plotted_grid, plotted_simulation_flows = plot_ring_attractor_flow_and_trajectories(
         args, simulation, trajectories

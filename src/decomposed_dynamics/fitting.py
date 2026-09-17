@@ -10,102 +10,43 @@ from decomposed_dynamics.dynamics_models import (
     OperatorHyperparams,
 )
 from decomposed_dynamics.inference import (
-    BPDNDFNoObsInference,
+    InferenceBackend,
     InferenceHyperparams,
+    NoObsInferenceBackend,
 )
-from decomposed_dynamics.inference.base import NoObsInferenceBackend
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
 
 def fit(
     data: dict,
-    observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
     samples_per_snippet: int,
     num_snippets: int,
-    lr_init: float = 10.0,
-    lr_decay: float = 0.9995,
-    max_iter: int = 200,
-    operator_update_hyperparams: dict | OperatorHyperparams = {},
-    inference_hyperparams: dict | InferenceHyperparams = {},
-) -> tuple[ObservationModel, DecomposedDynamicsModel]:
-    if type(operator_update_hyperparams) is dict:
-        operator_update_hyperparams = dynamics_model.initialize_hyperparams(
-            **operator_update_hyperparams
-        )
-
-    if type(inference_hyperparams) is dict:
-        inference_hyperparams = InferenceHyperparams(**inference_hyperparams)
-
-    lr = lr_init
-    progress_bar = trange(max_iter)
-
-    for i in progress_bar:
-        observations, _ = extract_snippets(
-            data, num_snippets, samples_per_snippet, seed=i
-        )
-
-        latents, operator_coeffs = bpdn_df_inference(
-            observation_model,
-            dynamics_model,
-            dynamics_model.compute_operator_predictions,
-            observations,
-            inference_hyperparams,
-        )
-
-        data_nll, data_nll_grads = data_nll_value_and_grad(
-            observation_model, observations, latents
-        )
-        dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
-            dynamics_model, latents, operator_coeffs
-        )
-
-        updated_obs_model, delta_obs_model = update_observation_model(
-            observation_model, data_nll_grads, lr
-        )
-        updated_dynamics_model, delta_dynamics_model = update_dynamics_model(
-            dynamics_model,
-            dynamics_recon_grads,
-            lr,
-            operator_update_hyperparams,
-        )
-
-        delta_str = f"Data NLL: {data_nll:.4f}, Recon. Loss: {dynamics_recon_loss:.4f}"
-        delta_str += eqx_module_to_string(delta_obs_model)
-        delta_str += eqx_module_to_string(delta_dynamics_model)
-        progress_bar.set_postfix_str(delta_str)
-
-        observation_model = updated_obs_model
-        dynamics_model = updated_dynamics_model
-        lr *= lr_decay
-
-    return observation_model, dynamics_model
-
-
-def fit_no_obs(
-    data: dict,
-    dynamics_model: DecomposedDynamicsModel,
-    samples_per_snippet: int,
-    num_snippets: int,
+    observation_model: ObservationModel | None = None,
     lr_init: float = 10.0,
     lr_end: None | float = None,
-    lr_decay: float = 0.9995,
     max_iter: int = 200,
-    inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
+    inference_backend: InferenceBackend | NoObsInferenceBackend | None = None,
     inference_hyperparams: InferenceHyperparams = None,
     model_update_hyperparams: dict | OperatorHyperparams = {},
     filter_spec=None,
     prox_hyperparams_end: None | float = None,
-) -> DecomposedDynamicsModel:
+) -> tuple[ObservationModel | None, DecomposedDynamicsModel]:
+    """Fit `dynamics_model`, jointly with `observation_model` when one is given."""
 
     # TODO: wrap parameter initialization into a function
+    if inference_backend is None and inference_hyperparams is None:
+        raise ValueError("pass an inference backend, inference hyperparams, or both")
+    if inference_backend is None:
+        inference_backend = inference_hyperparams.get_backend(observation_model)
+    elif inference_hyperparams is None:
+        inference_hyperparams = inference_backend.initialize_hyperparams()
+
     if type(model_update_hyperparams) is dict:
         model_update_hyperparams = dynamics_model.initialize_hyperparams(
             **model_update_hyperparams
         )
-    if inference_hyperparams is None:
-        inference_hyperparams = inference_backend.initialize_hyperparams()
 
     if filter_spec is None:
         filter_spec = jax.tree_util.tree_map(lambda _: True, dynamics_model)
@@ -123,28 +64,31 @@ def fit_no_obs(
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
-        latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
+        snippets, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
-        if i < max_iter / 2:
-            inference_hyperparams = eqx.tree_at(
-                lambda hyperparams: hyperparams.prox_hyperparams,
+        inference_hyperparams = eqx.tree_at(
+            lambda hyperparams: hyperparams.prox_hyperparams,
+            inference_hyperparams,
+            prox_hyperparams_schedule[min(i, prox_hyperparams_schedule.shape[0] - 1)],
+        )
+
+        if observation_model is None:
+            latents = snippets
+            operator_coeffs = inference_backend.infer_batch(
+                dynamics_model,
+                latents[:, :-1, :],
+                latents[:, 1:, :],
                 inference_hyperparams,
-                prox_hyperparams_schedule[i],
+                dynamics_model.compute_operator_predictions,
             )
         else:
-            inference_hyperparams = eqx.tree_at(
-                lambda hyperparams: hyperparams.prox_hyperparams,
+            latents, operator_coeffs = inference_backend.infer_batch(
+                observation_model,
+                dynamics_model,
+                snippets,
                 inference_hyperparams,
-                prox_hyperparams_schedule[-1],
+                dynamics_model.compute_operator_predictions,
             )
-
-        operator_coeffs = inference_backend.infer_batch(
-            dynamics_model,
-            latents[:, :-1, :],
-            latents[:, 1:, :],
-            inference_hyperparams,
-            dynamics_model.compute_operator_predictions,
-        )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
             dynamics_model, filter_spec
@@ -152,7 +96,7 @@ def fit_no_obs(
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
             diff_dynamics_model, static_dynamics_model, latents, operator_coeffs
         )
-        updated_model, delta_model = update_dynamics_model(
+        dynamics_model, delta_dynamics_model = update_dynamics_model(
             dynamics_model,
             dynamics_recon_grads,
             lr[i],
@@ -161,12 +105,21 @@ def fit_no_obs(
         )
 
         delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
-        delta_str += eqx_module_to_string(delta_model)
+
+        if observation_model is not None:
+            data_nll, data_nll_grads = data_nll_value_and_grad(
+                observation_model, snippets, latents
+            )
+            observation_model, delta_obs_model = update_observation_model(
+                observation_model, data_nll_grads, lr[i]
+            )
+            delta_str = f"Data NLL: {data_nll:.4f}, " + delta_str
+            delta_str += eqx_module_to_string(delta_obs_model)
+
+        delta_str += eqx_module_to_string(delta_dynamics_model)
         progress_bar.set_postfix_str(delta_str)
 
-        dynamics_model = updated_model
-
-    return dynamics_model
+    return observation_model, dynamics_model
 
 
 @eqx.filter_jit

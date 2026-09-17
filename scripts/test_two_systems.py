@@ -13,9 +13,7 @@ from decomposed_dynamics.dynamics_models import (
     DecomposedAffineDynamics,
     DecomposedLinearDynamics,
 )
-from decomposed_dynamics.fitting import (
-    fit_no_obs,
-)
+from decomposed_dynamics.fitting import fit
 
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
@@ -25,7 +23,7 @@ if __name__ == "__main__":
 
         key = jr.key(seed)
         model = DecomposedAffineDynamics(num_operators=15, state_dim=8, key=key)
-        model = fit_no_obs(X, model, 200, 20, max_iter=200)
+        _, model = fit(X, model, 200, 20, max_iter=200)
         plot_Fs(F)
         plot_Fs(model.F)
         plt.show()
