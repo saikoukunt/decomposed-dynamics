@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -12,11 +10,10 @@ from decomposed_dynamics.dynamics_models import (
     OperatorHyperparams,
 )
 from decomposed_dynamics.inference import (
+    BPDNDFNoObsInference,
     InferenceHyperparams,
-    NoObsInferenceHyperparams,
-    bpdn_df_inference,
-    bpdn_df_inference_no_obs,
 )
+from decomposed_dynamics.inference.base import NoObsInferenceBackend
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
@@ -95,10 +92,11 @@ def fit_no_obs(
     lr_end: None | float = None,
     lr_decay: float = 0.9995,
     max_iter: int = 200,
+    inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
+    inference_hyperparams: InferenceHyperparams = None,
     model_update_hyperparams: dict | OperatorHyperparams = {},
-    inference_hyperparams: dict | NoObsInferenceHyperparams = {},
     filter_spec=None,
-    hyperparams_prox_end: None | float = None,
+    prox_hyperparams_end: None | float = None,
 ) -> DecomposedDynamicsModel:
 
     # TODO: wrap parameter initialization into a function
@@ -106,9 +104,8 @@ def fit_no_obs(
         model_update_hyperparams = dynamics_model.initialize_hyperparams(
             **model_update_hyperparams
         )
-
-    if type(inference_hyperparams) is dict:
-        inference_hyperparams = NoObsInferenceHyperparams(**inference_hyperparams)
+    if inference_hyperparams is None:
+        inference_hyperparams = inference_backend.initialize_hyperparams()
 
     if filter_spec is None:
         filter_spec = jax.tree_util.tree_map(lambda _: True, dynamics_model)
@@ -117,10 +114,10 @@ def fit_no_obs(
         lr_end = lr_init
     lr = jnp.linspace(lr_init, lr_end, max_iter)
 
-    if hyperparams_prox_end is None:
-        hyperparams_prox_end = inference_hyperparams.l1_coeff
-    hyperparams_prox = jnp.linspace(
-        inference_hyperparams.l1_coeff, hyperparams_prox_end, int(max_iter / 2)
+    if prox_hyperparams_end is None:
+        prox_hyperparams_end = inference_hyperparams.prox_hyperparams
+    prox_hyperparams_schedule = jnp.linspace(
+        inference_hyperparams.prox_hyperparams, prox_hyperparams_end, int(max_iter / 2)
     )
 
     progress_bar = trange(max_iter)
@@ -129,20 +126,24 @@ def fit_no_obs(
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
         if i < max_iter / 2:
-            inference_hyperparams = replace(
-                inference_hyperparams, l1_coeff=hyperparams_prox[i]
+            inference_hyperparams = eqx.tree_at(
+                lambda hyperparams: hyperparams.prox_hyperparams,
+                inference_hyperparams,
+                prox_hyperparams_schedule[i],
             )
         else:
-            inference_hyperparams = replace(
-                inference_hyperparams, l1_coeff=hyperparams_prox[-1]
+            inference_hyperparams = eqx.tree_at(
+                lambda hyperparams: hyperparams.prox_hyperparams,
+                inference_hyperparams,
+                prox_hyperparams_schedule[-1],
             )
 
-        operator_coeffs = bpdn_df_inference_no_obs(
+        operator_coeffs = inference_backend.infer_batch(
             dynamics_model,
-            dynamics_model.compute_operator_predictions,
             latents[:, :-1, :],
             latents[:, 1:, :],
             inference_hyperparams,
+            dynamics_model.compute_operator_predictions,
         )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -212,32 +213,27 @@ def update_dynamics_model(
 def compute_dynamics_recon_loss(
     diff_dynamics_model: DecomposedDynamicsModel,
     static_dynamics_model: DecomposedDynamicsModel,
-    latents: Array,
+    states: Array,
     operator_coeffs: Array,
 ):
     dynamics_model = eqx.combine(diff_dynamics_model, static_dynamics_model)
     return vmap(compute_dynamics_recon_loss_sequence, in_axes=(None, 0, 0))(
-        dynamics_model, latents, operator_coeffs
+        dynamics_model, states, operator_coeffs
     ).mean()
 
 
 @eqx.filter_jit
 def compute_dynamics_recon_loss_sequence(
     dynamics_model: DecomposedDynamicsModel,
-    latents: Array,
+    states: Array,
     operator_coeffs: Array,
 ):
-    flows = dynamics_model.compute_operator_predictions(latents[:-1, :])
-    predictions = dynamics_model.combine_operator_predictions(
-        latents[:-1, :], operator_coeffs, flows
-    )
-    mse = l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
+    flows = dynamics_model.compute_operator_predictions(states[:-1, :])
+    predictions = dynamics_model.combine_operator_predictions(operator_coeffs, flows)
+    mse = l2_loss(predictions, states[1:, :]).sum(axis=-1).mean()
 
-    null_predictions = dynamics_model.combine_operator_predictions(
-        latents[:-1, :], jnp.zeros_like(operator_coeffs), flows
-    )
     variance = jnp.maximum(
-        l2_loss(null_predictions, latents[1:, :]).sum(axis=-1).mean(), 1e-3
+        l2_loss(jnp.zeros_like(predictions), states[1:, :]).sum(axis=-1).mean(), 1e-4
     )
 
     return mse / variance

@@ -1,8 +1,16 @@
 from decomposed_dynamics.inference.base import (
+    InferenceBackend,
     InferenceHyperparams,
-    NoObsInferenceHyperparams,
+    NoObsInferenceBackend,
+    InferenceHyperparams,
+    solve_reweighted,
 )
 from decomposed_dynamics.inference.bpdn import (
-    bpdn_df_inference,
-    bpdn_df_inference_no_obs,
+    BPDNDFHyperparams,
+    BPDNDFInference,
+    BPDNDFNoObsInference,
+)
+from decomposed_dynamics.inference.fused_lasso import (
+    FusedLassoHyperparams,
+    FusedLassoNoObsInference,
 )

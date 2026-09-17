@@ -11,8 +11,9 @@ from tqdm import trange
 
 from decomposed_dynamics.dynamics_models import HierarchicalDecomposedDynamics
 from decomposed_dynamics.inference import (
-    NoObsInferenceHyperparams,
-    bpdn_df_inference_no_obs,
+    BPDNDFNoObsInference,
+    NoObsInferenceBackend,
+    InferenceHyperparams,
 )
 from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
 
@@ -27,15 +28,16 @@ def fit_hierarchical_mlps(
     lr_end: float,
     filter_spec: HierarchicalDecomposedDynamics,
     max_iter: int = 200,
-    inference_hyperparams: dict | NoObsInferenceHyperparams = {},
-    prox_coeff_max: float = 0.4,
+    inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
+    inference_hyperparams: dict | InferenceHyperparams = {},
+    prox_hyperparams_max: float = 0.4,
 ) -> HierarchicalDecomposedDynamics:
 
     progress_bar = trange(max_iter)
 
     lr = jnp.linspace(lr_init, lr_end, max_iter)
-    prox_coeffs = jnp.linspace(
-        inference_hyperparams.l1_coeff, jnp.array(prox_coeff_max), int(max_iter / 2)
+    prox_hyperparams_schedule = jnp.linspace(
+        inference_hyperparams.prox_hyperparams, jnp.array(prox_hyperparams_max), int(max_iter / 2)
     )
 
     for i in progress_bar:
@@ -44,18 +46,18 @@ def fit_hierarchical_mlps(
 
         if i < max_iter / 2:
             inference_hyperparams = replace(
-                inference_hyperparams, l1_coeff=prox_coeffs[i]
+                inference_hyperparams, prox_hyperparams=prox_hyperparams_schedule[i]
             )
         else:
             inference_hyperparams = replace(
-                inference_hyperparams, l1_coeff=prox_coeffs[-1]
+                inference_hyperparams, prox_hyperparams=prox_hyperparams_schedule[-1]
             )
-        mlp_coeffs = bpdn_df_inference_no_obs(
+        mlp_coeffs = inference_backend.infer_batch(
             dynamics_model,
-            dynamics_model.compute_coeff_predictions,
             latents,
             C_batch,
             inference_hyperparams,
+            dynamics_model.compute_coeff_predictions,
         )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -108,7 +110,7 @@ def infer_mlp_coeffs(
     model: HierarchicalDecomposedDynamics,
     X: Array,
     C: Array,
-    hyperparams: NoObsInferenceHyperparams,
+    hyperparams: InferenceHyperparams,
 ):
     solver = ProximalGradient(
         functools.partial(recon_loss, model=model),
@@ -127,7 +129,7 @@ def _infer_mlp_coeffs_one(
     solver: ProximalGradient,
     x_t: Array,
     target_c_t: Array,
-    hyperparams: NoObsInferenceHyperparams,
+    hyperparams: InferenceHyperparams,
 ):
     coeffs, _ = solver.run(
         jnp.zeros(model.num_operators),
@@ -144,7 +146,7 @@ def recon_loss(
     c_t: Array, model: HierarchicalDecomposedDynamics, target_c_t: Array, x_t: Array
 ):
     predicted_cs = model._compute_coeff_predictions(model.G, x_t)
-    predicted_cs = model.combine_operator_predictions(x_t, c_t, predicted_cs)
+    predicted_cs = model.combine_operator_predictions(c_t, predicted_cs)
     return l2_loss(predicted_cs, target_c_t).sum()
 
 
@@ -159,7 +161,7 @@ def recon_loss_diff(
 ):
     model = eqx.combine(diff_model, static_model)
     predicted_cs = model._compute_coeff_predictions_batched(model.G, latents)
-    predicted_cs = model.combine_operator_predictions(latents, coeffs, predicted_cs)
+    predicted_cs = model.combine_operator_predictions(coeffs, predicted_cs)
 
     return (loss_weights * l2_loss(predicted_cs, targets).sum(axis=-1)).sum()
 

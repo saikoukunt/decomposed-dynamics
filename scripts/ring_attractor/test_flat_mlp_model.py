@@ -8,9 +8,8 @@ import matplotlib.pyplot as plt
 
 from decomposed_dynamics.dynamics_models import MLPDecomposedDynamics
 from decomposed_dynamics.fitting import fit_no_obs
-from decomposed_dynamics.inference import NoObsInferenceHyperparams
-from decomposed_dynamics.inference.bpdn import bpdn_df_inference_no_obs
-from decomposed_dynamics.utils import prox_l1_binary
+from decomposed_dynamics.inference import BPDNDFHyperparams, BPDNDFNoObsInference
+from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from test_ring_attractor import (
@@ -33,10 +32,10 @@ def main():
 
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
     model = MLPDecomposedDynamics(
-        num_operators=6, num_latents=2, key=keys[3], layer_width=20, num_hidden_layers=4
+        num_operators=6, state_dim=2, key=keys[3], layer_width=20, num_hidden_layers=4
     )
     inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=jnp.array([0.2, 0.1]),
+        l1_coeff=jnp.array([0.7, 0.4]),
         prox=prox_l1_binary,
         l1_reweight_coeff=jnp.array([200, 0.0]),
         smooth_coeff=0,
@@ -45,23 +44,22 @@ def main():
         trajectory_dict,
         model,
         samples_per_snippet=20,
-        num_snippets=100,
+        num_snippets=50,
         max_iter=2000,
         lr_init=1,
         lr_end=1e-4,
         inference_hyperparams=inference_hyperparams,
         model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.0),
-        hyperparams_prox_end=jnp.array([0.7, 0.4]),
+        prox_hyperparams_end=jnp.array([0.7, 0.4]),
     )
-    inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=jnp.array([0.7, 0.4]),
-        prox=prox_l1_binary,
-        l1_reweight_coeff=jnp.array([200, 0.0]),
+    inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
+    inference_hyperparams = BPDNDFHyperparams(
+        prox_hyperparams=jnp.array([0.7, 0.4]),
+        prox_reweight_coeff=jnp.array([200, 0.0]),
     )
 
-    mlp_coeffs = bpdn_df_inference_no_obs(
+    mlp_coeffs = inference_backend.infer_batch(
         model,
-        model.compute_operator_predictions,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,

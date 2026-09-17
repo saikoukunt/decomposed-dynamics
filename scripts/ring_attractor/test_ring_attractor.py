@@ -24,9 +24,9 @@ from decomposed_dynamics.dynamics_models import (
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit_no_obs
-from decomposed_dynamics.inference import bpdn_df_inference_no_obs
-from decomposed_dynamics.inference.base import NoObsInferenceHyperparams
-from decomposed_dynamics.utils import prox_l1_binary
+from decomposed_dynamics.inference import BPDNDFHyperparams
+from decomposed_dynamics.inference.bpdn import BPDNDFNoObsInference
+from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plot_utils import plot_Fs
@@ -105,14 +105,14 @@ def plot_MLP_flow_field(
     fig, ax = plt.subplots(figsize=(6, 6), nrows=1, ncols=1)
 
     axis = jnp.arange(start, stop + step, step)
-    grid = jnp.meshgrid(*([axis] * model.num_latents))
+    grid = jnp.meshgrid(*([axis] * model.state_dim))
     flat_grid = jnp.array([axis.flatten() for axis in grid]).T
 
     flat_operator_predictions = model.compute_operator_predictions(flat_grid)[
         :, mlp_ind, :
     ]
     flat_flow = flat_operator_predictions - flat_grid
-    flows = flat_flow.reshape(axis.shape[0], axis.shape[0], model.num_latents)
+    flows = flat_flow.reshape(axis.shape[0], axis.shape[0], model.state_dim)
     flows = np.array(flows)
     axis = np.array(axis)
     grid = np.array(grid).transpose(1, 2, 0)
@@ -202,7 +202,7 @@ def fit_infer_hierarchical_model_all_stages(
     model_fit, dlds_coeffs = load_dlds_coeffs(model.primitives, model_path, coeffs_path)
 
     if model_fit is None:
-        inference_hyperparams = NoObsInferenceHyperparams(l1_coeff=0.7)
+        inference_hyperparams = BPDNDFHyperparams(prox_hyperparams=0.7)
         model_fit = fit_no_obs(
             trajectory_dict,
             model.primitives,
@@ -215,15 +215,16 @@ def fit_infer_hierarchical_model_all_stages(
                 decorr_coeff=0.02, l1_coeff=0.01
             ).primitive_hyperparams,
         )
-        inference_hyperparams = NoObsInferenceHyperparams(
-            l1_coeff=0.7, smooth_coeff=0.4
+        inference_hyperparams = BPDNDFHyperparams(
+            prox_hyperparams=0.7, smooth_coeff=0.4
         )
-        dlds_coeffs = bpdn_df_inference_no_obs(
+        inference_backend = BPDNDFNoObsInference()
+        dlds_coeffs = inference_backend.infer_batch(
             model_fit,
-            model_fit.compute_operator_predictions,
             trajectories[:, :-1, :],
             trajectories[:, 1:, :],
             inference_hyperparams,
+            model_fit.compute_operator_predictions,
         )
 
         eqx.tree_serialise_leaves(model_path, model_fit)
@@ -239,10 +240,10 @@ def fit_infer_hierarchical_model_all_stages(
 
     filter_spec = jax.tree_util.tree_map(lambda _: False, model)
     filter_spec = eqx.tree_at(lambda model: model.G, filter_spec, replace=True)
-    inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=[0, 0.1],
-        prox=prox_l1_binary,
-        l1_reweight_coeff=[200, 0],
+    inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
+    inference_hyperparams = BPDNDFHyperparams(
+        prox_hyperparams=[0, 0.1],
+        prox_reweight_coeff=[200, 0],
         smooth_coeff=0.4,
     )
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
@@ -257,38 +258,37 @@ def fit_infer_hierarchical_model_all_stages(
         max_iter=2000,
         lr_init=1,
         lr_end=1,
+        inference_backend=inference_backend,
         inference_hyperparams=inference_hyperparams,
         filter_spec=filter_spec,
-        prox_coeff_max=[0, 0.4],
+        prox_hyperparams_max=[0, 0.4],
     )
 
-    inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=[0.0, 0.4],
-        prox=prox_l1_binary,
-        l1_reweight_coeff=[200, 0],
+    inference_hyperparams = BPDNDFHyperparams(
+        prox_hyperparams=[0.0, 0.4],
+        prox_reweight_coeff=[200, 0],
         smooth_coeff=0.4,
     )
     coords = trajectories[:, :20, :]
-    mlp_coeffs = bpdn_df_inference_no_obs(
+    mlp_coeffs = inference_backend.infer_batch(
         model,
-        model.compute_coeff_predictions,
         coords,
         dlds_coeffs,
         inference_hyperparams,
+        model.compute_coeff_predictions,
     )
 
-    inference_hyperparams = NoObsInferenceHyperparams(
-        l1_coeff=[0.0, 0.4],
-        prox=prox_l1_binary,
-        l1_reweight_coeff=[200, 0],
+    inference_hyperparams = BPDNDFHyperparams(
+        prox_hyperparams=[0.0, 0.4],
+        prox_reweight_coeff=[200, 0],
         smooth_coeff=0,
     )
-    reinferred_mlp_coeffs = bpdn_df_inference_no_obs(
+    reinferred_mlp_coeffs = inference_backend.infer_batch(
         model,
-        model.compute_operator_predictions,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,
+        model.compute_operator_predictions,
     )
 
     return model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs
@@ -333,7 +333,6 @@ def plot_hierarchical_model_fit(
         model.G, coords.reshape(-1, 2)
     )
     mlp_combined_dlds_coeff_predictions = model.combine_operator_predictions(
-        coords,
         mlp_coeffs.reshape(-1, model.num_operators),
         per_mlp_dlds_coeff_predictions,
     )
@@ -431,7 +430,7 @@ def main():
     model = HierarchicalDecomposedDynamics(
         num_nonlinear_operators=6,
         num_primitives=6,
-        num_latents=2,
+        state_dim=2,
         primitive_type=DecomposedLinearDynamics,
         key=keys[3],
         layer_width=10,
