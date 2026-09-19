@@ -1,7 +1,8 @@
-import argparse
 import os
 import sys
+from types import SimpleNamespace
 
+import click
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -30,67 +31,6 @@ from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plot_utils import plot_Fs
-
-
-def parse_args(argv: list):
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-
-    parser.add_argument(
-        "-n",
-        "--num_trajectories",
-        default=100,
-        type=int,
-        help="number of trajectories to sample",
-    )
-    parser.add_argument(
-        "--dt",
-        default=0.05,
-        type=float,
-        help="time step in seconds for Euler approximation",
-    )
-    parser.add_argument(
-        "--tau",
-        default=0.2,
-        type=float,
-        help="timescale in seconds of the flow field",
-    )
-    parser.add_argument(
-        "--sigma",
-        default=0.0,
-        type=float,
-        help="white noise variance",
-    )
-    parser.add_argument(
-        "--T",
-        default=5,
-        type=float,
-        help="duration of sampled trajectories in seconds",
-    )
-    parser.add_argument(
-        "--seed",
-        default=0,
-        type=int,
-        help="random seed",
-    )
-    parser.add_argument(
-        "--min_radius",
-        default=0,
-        type=float,
-        help="random seed",
-    )
-    parser.add_argument(
-        "--max_radius",
-        default=2,
-        type=float,
-        help="random seed",
-    )
-    if "-h" in argv or "--help" in argv:
-        parser.print_help()
-        return None
-
-    return parser.parse_args(argv)
 
 
 def plot_MLP_flow_field(
@@ -415,10 +355,17 @@ def plot_coeff_spatial_maps(coeffs, trajectories, symbol):
     return fig
 
 
-def main():
-    args = parse_args(sys.argv[1:])
-    if args is None:
-        return
+@click.command(context_settings={"show_default": True, "help_option_names": ["-h", "--help"]})
+@click.option("-n", "--num_trajectories", default=100, help="number of trajectories to sample")
+@click.option("--dt", default=0.05, help="time step in seconds for Euler approximation")
+@click.option("--tau", default=0.2, help="timescale in seconds of the flow field")
+@click.option("--sigma", default=0.0, help="white noise variance")
+@click.option("--T", "T", default=5.0, help="duration of sampled trajectories in seconds")
+@click.option("--seed", default=0, help="random seed")
+@click.option("--min_radius", default=0.0, help="minimum radius of initial conditions")
+@click.option("--max_radius", default=2.0, help="maximum radius of initial conditions")
+def main(**kwargs):
+    args = SimpleNamespace(**kwargs)
 
     keys = jr.split(jr.key(args.seed), 6)
     simulation, trajectories = simulate_ring_attractor(args, keys)

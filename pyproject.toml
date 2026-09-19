@@ -27,6 +27,7 @@ members = ["simulations"]
 
 [dependency-groups]
 dev = [
+    "click>=8.5.0",
     "matplotlib>=3.10.9",
     "simulations",
     "tornado>=6.5.7",
