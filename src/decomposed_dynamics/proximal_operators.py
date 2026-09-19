@@ -84,9 +84,11 @@ def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
     return project_on_C(x - DT(p))
 
 
-def prox_l1_unit_tv(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any:
-    l1_coeff = hyperparams_prox[..., 0]
-    _lambda = hyperparams_prox[..., 1]
+def prox_l1_unit_tv(
+    x: Any, hyperparams_prox: Array | tuple[Array, Array], scaling: float = 1.0
+) -> Any:
+    # unpacks both a (2,) array and the per-entry (l1, tv) weights from reweighting
+    l1_coeff, _lambda = hyperparams_prox
     x = prox_unit_tv(x, _lambda, scaling)
     x = prox_lasso(x, l1_coeff, scaling)
 

@@ -106,7 +106,7 @@ def simulate_sparse_switching_dynamics(
     num_samples = args.num_segments * args.segment_length
     states = jr.normal(keys[2], (args.num_trials, num_samples, args.state_dim))
     targets = model.combine_operator_predictions(
-        coeffs, model.compute_operator_predictions(states)
+        states, coeffs, model.compute_operator_predictions(states)
     )
     targets += args.sigma * targets.std() * jr.normal(keys[3], targets.shape)
 
@@ -206,7 +206,6 @@ def main():
         states,
         targets,
         inference_hyperparams,
-        model.compute_operator_predictions,
     )
 
     active = true_coeffs > 0

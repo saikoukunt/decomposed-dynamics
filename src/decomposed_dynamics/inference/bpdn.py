@@ -53,7 +53,6 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
     def infer_trial(
         self,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         states: Array,
         targets: Array,
         hyperparams: BPDNDFHyperparams,
@@ -68,7 +67,6 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
         infer_one_timestep = functools.partial(
             self.infer_one_timestep,
             dynamics_model=dynamics_model,
-            compute_per_operator_predictions=compute_per_operator_predictions,
             solver=solver,
             hyperparams=hyperparams,
         )
@@ -86,14 +84,13 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
         carry: tuple[Array, Array],
         xs: tuple[Array, Array],
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         solver: ProximalGradient,
         hyperparams: BPDNDFHyperparams,
     ) -> tuple[tuple[Array, Array], Array]:
 
         prev_coeffs, timestep = carry
         states, targets = xs
-        per_operator_predictions = compute_per_operator_predictions(states)
+        per_operator_predictions = dynamics_model.compute_operator_predictions(states)
         smooth_coeff = jnp.where(timestep == 0, 0.0, hyperparams.smooth_coeff)
 
         coeffs = solve_reweighted(
@@ -102,6 +99,7 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
             hyperparams.prox_hyperparams,
             hyperparams.prox_reweight_coeff,
             per_operator_predictions=per_operator_predictions,
+            states=states,
             targets=targets,
             prev_coeffs=prev_coeffs,
             smooth_coeff=smooth_coeff,
@@ -115,13 +113,14 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
         coeffs: Array,
         dynamics_model: DecomposedDynamicsModel,
         per_operator_predictions: Array,
+        states: Array,
         targets: Array,
         prev_coeffs: Array,
         smooth_coeff: Array,
     ) -> Array:
 
         recon_loss = normalized_dynamics_reconstruction_loss(
-            dynamics_model, coeffs, targets, per_operator_predictions
+            dynamics_model, states, coeffs, targets, per_operator_predictions
         )
         smoothness_loss = coeff_smoothness_loss(coeffs, prev_coeffs)
 
@@ -147,13 +146,11 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
         states: Array,
         targets: Array,
         hyperparams: BPDNDFHyperparams,
-        compute_per_operator_predictions: Callable,
     ) -> Array:
 
         infer_trial = functools.partial(
             self.infer_trial,
             dynamics_model,
-            compute_per_operator_predictions,
             hyperparams=hyperparams,
         )
         return lax.map(lambda trial: infer_trial(*trial), (states, targets))
@@ -163,18 +160,20 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
     def infer_trial(
         self,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         states: Array,
         targets: Array,
         hyperparams: BPDNDFHyperparams,
     ) -> Array:
 
-        per_operator_predictions = vmap(compute_per_operator_predictions)(states)
+        per_operator_predictions = vmap(dynamics_model.compute_operator_predictions)(
+            states
+        )
         solver = ProximalGradient(
             functools.partial(
-                self.bpdn_df_smooth_loss_sequence,
+                self.bpdn_df_smooth_loss,
                 dynamics_model=dynamics_model,
                 per_operator_predictions=per_operator_predictions,
+                states=states,
                 targets=targets,
                 smooth_coeff=hyperparams.smooth_coeff,
             ),
@@ -192,16 +191,17 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
 
     @staticmethod
     @eqx.filter_jit
-    def bpdn_df_smooth_loss_sequence(
+    def bpdn_df_smooth_loss(
         coeffs: Array,
         dynamics_model: DecomposedDynamicsModel,
         per_operator_predictions: Array,
+        states: Array,
         targets: Array,
         smooth_coeff: Array,
     ) -> Array:
 
         recon_loss = normalized_dynamics_reconstruction_loss(
-            dynamics_model, coeffs, targets, per_operator_predictions
+            dynamics_model, states, coeffs, targets, per_operator_predictions
         ).sum()
         smoothness_loss = coeff_smoothness_loss(coeffs[1:], coeffs[:-1]).sum()
 
@@ -223,7 +223,6 @@ class BPDNDFInference(InferenceBackend):
         self,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         observations: Array,
         hyperparams: BPDNDFHyperparams,
     ) -> Array:
@@ -242,7 +241,6 @@ class BPDNDFInference(InferenceBackend):
             self.infer_one_timestep,
             observation_model=observation_model,
             dynamics_model=dynamics_model,
-            compute_per_operator_predictions=compute_per_operator_predictions,
             solver=solver,
             hyperparams=hyperparams,
         )
@@ -264,7 +262,6 @@ class BPDNDFInference(InferenceBackend):
         observations: Array,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         solver: ProximalGradient,
         hyperparams: BPDNDFHyperparams,
     ) -> tuple[tuple[Array, Array], Array]:
@@ -273,7 +270,9 @@ class BPDNDFInference(InferenceBackend):
         prev_latents = state[: dynamics_model.state_dim]
         prev_coeffs = state[dynamics_model.state_dim :]
 
-        per_operator_predictions = compute_per_operator_predictions(prev_latents)
+        per_operator_predictions = dynamics_model.compute_operator_predictions(
+            prev_latents
+        )
 
         # no dynamics loss for timestep 0 since we don't have previous observations
         dynamics_loss_coeff = jnp.where(
@@ -297,6 +296,7 @@ class BPDNDFInference(InferenceBackend):
             ),
             per_operator_predictions=per_operator_predictions,
             observations=observations,
+            prev_latents=prev_latents,
             prev_coeffs=prev_coeffs,
             dynamics_loss_coeff=dynamics_loss_coeff,
             smooth_coeff=smooth_coeff,
@@ -312,6 +312,7 @@ class BPDNDFInference(InferenceBackend):
         dynamics_model: DecomposedDynamicsModel,
         per_operator_predictions: Array,
         observations: Array,
+        prev_latents: Array,
         prev_coeffs: Array,
         dynamics_loss_coeff: Array,
         smooth_coeff: Array,
@@ -323,7 +324,7 @@ class BPDNDFInference(InferenceBackend):
         data_nll = observation_model.neg_log_likelihood(predicted_rates, observations)
 
         dynamics_recon_loss = normalized_dynamics_reconstruction_loss(
-            dynamics_model, coeffs, latents, per_operator_predictions
+            dynamics_model, prev_latents, coeffs, latents, per_operator_predictions
         )
         smooth_loss = smooth_coeff * coeff_smoothness_loss(coeffs, prev_coeffs)
 

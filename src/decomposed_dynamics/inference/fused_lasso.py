@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Callable, override
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jax import Array, lax, vmap
 from jaxopt import ProximalGradient
@@ -35,11 +36,22 @@ class FusedLassoHyperparams(InferenceHyperparams):
         return FusedLassoNoObsInference()
 
 
-def _lipschitz_constant(per_operator_predictions: Array, targets: Array) -> Array:
-    variance = jnp.maximum(0.5 * (targets**2).sum(-1), 1e-4)
-    gram = jnp.einsum(
-        "tki, tli -> tkl", per_operator_predictions, per_operator_predictions
+def _lipschitz_constant(
+    dynamics_model: DecomposedDynamicsModel,
+    states: Array,
+    per_operator_predictions: Array,
+    targets: Array,
+) -> Array:
+    zero_coeffs = jnp.zeros(per_operator_predictions.shape[:-1])
+    null_predictions = dynamics_model.combine_operator_predictions(
+        states, zero_coeffs, per_operator_predictions
     )
+    variance = jnp.maximum(0.5 * ((targets - null_predictions) ** 2).sum(-1), 1e-4)
+    # combine is affine in the coefficients, so its jacobian gives the effective atoms
+    atoms = vmap(jax.jacfwd(dynamics_model.combine_operator_predictions, argnums=1))(
+        states, zero_coeffs, per_operator_predictions
+    )
+    gram = jnp.einsum("tik, til -> tkl", atoms, atoms)
 
     return jnp.linalg.eigvalsh(gram / variance[:, None, None])[:, -1].max()
 
@@ -75,13 +87,11 @@ class FusedLassoNoObsInference(NoObsInferenceBackend):
         states: Array,
         targets: Array,
         hyperparams: FusedLassoHyperparams,
-        compute_per_operator_predictions: Callable,
     ) -> Array:
 
         infer_trial = functools.partial(
             self.infer_trial,
             dynamics_model,
-            compute_per_operator_predictions,
             hyperparams=hyperparams,
         )
         return lax.map(lambda trial: infer_trial(*trial), (states, targets))
@@ -91,26 +101,26 @@ class FusedLassoNoObsInference(NoObsInferenceBackend):
     def infer_trial(
         self,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         states: Array,
         targets: Array,
         hyperparams: FusedLassoHyperparams,
     ) -> Array:
 
-        per_operator_predictions = vmap(compute_per_operator_predictions)(states)
+        per_operator_predictions = vmap(dynamics_model.compute_operator_predictions)(states)
         solver = ProximalGradient(
             functools.partial(
                 self.least_squares_sequence,
                 dynamics_model=dynamics_model,
                 per_operator_predictions=per_operator_predictions,
+                states=states,
                 targets=targets,
             ),
             self.prox,
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
-            stepsize=lambda _, L=_lipschitz_constant(per_operator_predictions, targets): (
-                1 / L
-            ),
+            stepsize=lambda _, L=_lipschitz_constant(
+                dynamics_model, states, per_operator_predictions, targets
+            ): (1 / L),
         )
 
         return solve_reweighted(
@@ -127,8 +137,9 @@ class FusedLassoNoObsInference(NoObsInferenceBackend):
         coeffs: Array,
         dynamics_model: DecomposedDynamicsModel,
         per_operator_predictions: Array,
+        states: Array,
         targets: Array,
     ) -> Array:
         return normalized_dynamics_reconstruction_loss(
-            dynamics_model, coeffs, targets, per_operator_predictions
+            dynamics_model, states, coeffs, targets, per_operator_predictions
         ).sum()

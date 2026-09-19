@@ -63,7 +63,6 @@ def main():
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,
-        model.compute_operator_predictions,
     )
     plotted_grid, plotted_simulation_flows = plot_ring_attractor_flow_and_trajectories(
         args, simulation, trajectories

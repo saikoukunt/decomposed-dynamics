@@ -9,6 +9,7 @@ from jaxopt.prox import prox_lasso
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
 )
 from decomposed_dynamics.dynamics_models.linear import LinearOperatorHyperparams
 from decomposed_dynamics.dynamics_models.regularization import (
@@ -45,7 +46,7 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
 
     @eqx.filter_jit
     def regularize_operators(
-        self, latents: Array, hyperparams: AffineOperatorHyperparams
+        self, hyperparams: AffineOperatorHyperparams, latents: Array
     ) -> Self:
         F, b = self.apply_prox(
             self.F,
@@ -81,3 +82,9 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
         F = F - operator_decorr_coeff * decorr_gradient
 
         return F
+
+
+class DecomposedAffineDeltaDynamics(DeltaDynamics, DecomposedAffineDynamics):
+    @eqx.filter_jit
+    def compute_operator_predictions(self, x: Array) -> Array:
+        return jnp.einsum("kij, ...kj -> ...ki", self.F, x[..., None, :] - self.b)

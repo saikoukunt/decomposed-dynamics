@@ -13,7 +13,7 @@ def spectral_normalize(F: Array):
 @jit
 def operator_correlation(F: Array) -> Array:
     pairwise_corrs = jnp.einsum("kij, lij -> kl", F, F)
-    return jnp.sum(jnp.triu(pairwise_corrs**2, k=1))
+    return jnp.sum(jnp.triu(jnp.clip(pairwise_corrs, 0) ** 2, k=1))
 
 
 @eqx.filter_jit
@@ -21,9 +21,7 @@ def operator_flow_correlation(
     model: DecomposedDynamicsModel, locations: Array
 ) -> Array:
     locations = locations.reshape(-1, model.state_dim)
-    predictions = model.compute_operator_predictions(locations)
-    flows = predictions - locations[..., jnp.newaxis, :]
-    flows = flows.transpose(1, 0, 2)
+    flows = model.compute_operator_flows(locations).transpose(1, 0, 2)
 
     flows = flows.reshape(model.num_operators, -1)
     flows = flows / (jnp.linalg.norm(flows, axis=-1, keepdims=True) + 1e-8)

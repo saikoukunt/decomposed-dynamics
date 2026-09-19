@@ -9,7 +9,10 @@ from jaxopt import ProximalGradient
 from optax import l2_loss
 from tqdm import trange
 
-from decomposed_dynamics.dynamics_models import HierarchicalDecomposedDynamics
+from decomposed_dynamics.dynamics_models import (
+    HierarchicalDecomposedDynamics,
+    linear_combination,
+)
 from decomposed_dynamics.inference import (
     BPDNDFNoObsInference,
     NoObsInferenceBackend,
@@ -53,11 +56,10 @@ def fit_hierarchical_mlps(
                 inference_hyperparams, prox_hyperparams=prox_hyperparams_schedule[-1]
             )
         mlp_coeffs = inference_backend.infer_batch(
-            dynamics_model,
+            dynamics_model.coefficient_model(),
             latents,
             C_batch,
             inference_hyperparams,
-            dynamics_model.compute_coeff_predictions,
         )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -146,7 +148,7 @@ def recon_loss(
     c_t: Array, model: HierarchicalDecomposedDynamics, target_c_t: Array, x_t: Array
 ):
     predicted_cs = model._compute_coeff_predictions(model.G, x_t)
-    predicted_cs = model.combine_operator_predictions(c_t, predicted_cs)
+    predicted_cs = linear_combination(c_t, predicted_cs)
     return l2_loss(predicted_cs, target_c_t).sum()
 
 
@@ -161,7 +163,7 @@ def recon_loss_diff(
 ):
     model = eqx.combine(diff_model, static_model)
     predicted_cs = model._compute_coeff_predictions_batched(model.G, latents)
-    predicted_cs = model.combine_operator_predictions(coeffs, predicted_cs)
+    predicted_cs = linear_combination(coeffs, predicted_cs)
 
     return (loss_weights * l2_loss(predicted_cs, targets).sum(axis=-1)).sum()
 

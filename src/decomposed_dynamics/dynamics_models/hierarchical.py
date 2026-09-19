@@ -9,7 +9,9 @@ from jax import Array
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
     OperatorHyperparams,
+    linear_combination,
 )
 
 
@@ -45,6 +47,7 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
             layer_width=layer_width,
             num_hidden_layers=num_hidden_layers,
             activation_fn=activation_fn,
+            **primitive_kwargs,
         )
 
     @override
@@ -101,6 +104,9 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
     def compute_coeff_predictions(self, x: Array) -> Array:
         return self._compute_coeff_predictions(self.G, x)
 
+    def coefficient_model(self) -> "HierarchicalCoefficientModel":
+        return HierarchicalCoefficientModel(self)
+
     @eqx.filter_vmap(in_axes=(None, eqx.if_array(0), None))
     def _compute_coeff_predictions(self, G: eqx.nn.MLP, x: Array) -> Array:
         return G(x)
@@ -128,3 +134,27 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
     @eqx.filter_jit
     def decorrelate_operators(self) -> eqx.nn.MLP:
         return self.G
+
+
+class HierarchicalCoefficientModel(eqx.Module):
+    """View whose operators are the MLPs predicting primitive coefficients."""
+
+    model: HierarchicalDecomposedDynamics
+
+    @property
+    def num_operators(self) -> int:
+        return self.model.num_operators
+
+    def compute_operator_predictions(self, x: Array) -> Array:
+        return self.model.compute_coeff_predictions(x)
+
+    def combine_operator_predictions(self, x: Array, c: Array, preds: Array) -> Array:
+        return linear_combination(c, preds)
+
+
+class HierarchicalDecomposedDeltaDynamics(
+    DeltaDynamics, HierarchicalDecomposedDynamics
+):
+    def __init__(self, *args, dt: float, **kwargs):
+        self.dt = dt
+        HierarchicalDecomposedDynamics.__init__(self, *args, dt=dt, **kwargs)

@@ -33,3 +33,7 @@ dev = [
     "tornado>=6.5.7",
 ]
 
+
+[tool.ruff.lint]
+# keep unused imports on auto-fix; still reported as F401
+unfixable = ["F401"]

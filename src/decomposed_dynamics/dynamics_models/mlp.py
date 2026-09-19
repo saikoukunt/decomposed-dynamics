@@ -9,6 +9,7 @@ from jax import Array
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
     OperatorHyperparams,
 )
 from decomposed_dynamics.dynamics_models.regularization import operator_flow_correlation
@@ -110,3 +111,7 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
         updated_model = eqx.apply_updates(self, grad_updates)
 
         return updated_model
+
+
+class MLPDecomposedDeltaDynamics(DeltaDynamics, MLPDecomposedDynamics):
+    pass

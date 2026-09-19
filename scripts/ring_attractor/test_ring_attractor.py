@@ -19,8 +19,10 @@ from simulations.plot_utils import (
 from simulations.ring_attractor import RingAttractorSimulation
 
 from decomposed_dynamics.dynamics_models import (
-    DecomposedLinearDynamics,
+    DecomposedLinearDeltaDynamics,
+    HierarchicalDecomposedDeltaDynamics,
     HierarchicalDecomposedDynamics,
+    linear_combination,
 )
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
@@ -31,6 +33,8 @@ from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plot_utils import plot_Fs
+
+NUM_TIMEPOINTS = 20
 
 
 def plot_MLP_flow_field(
@@ -48,10 +52,7 @@ def plot_MLP_flow_field(
     grid = jnp.meshgrid(*([axis] * model.state_dim))
     flat_grid = jnp.array([axis.flatten() for axis in grid]).T
 
-    flat_operator_predictions = model.compute_operator_predictions(flat_grid)[
-        :, mlp_ind, :
-    ]
-    flat_flow = flat_operator_predictions - flat_grid
+    flat_flow = model.compute_operator_flows(flat_grid)[:, mlp_ind, :]
     flows = flat_flow.reshape(axis.shape[0], axis.shape[0], model.state_dim)
     flows = np.array(flows)
     axis = np.array(axis)
@@ -142,21 +143,23 @@ def fit_infer_hierarchical_model_all_stages(
     model_fit, dlds_coeffs = load_dlds_coeffs(model.primitives, model_path, coeffs_path)
 
     if model_fit is None:
-        inference_hyperparams = BPDNDFHyperparams(prox_hyperparams=0.7)
+        inference_hyperparams = BPDNDFHyperparams(
+            prox_hyperparams=0.3, smooth_coeff=0.1
+        )
         _, model_fit = fit(
             trajectory_dict,
             model.primitives,
-            samples_per_snippet=60,
+            samples_per_snippet=20,
             num_snippets=50,
-            max_iter=100,
+            max_iter=200,
             lr_init=1,
             inference_hyperparams=inference_hyperparams,
             model_update_hyperparams=model.initialize_hyperparams(
-                decorr_coeff=0.02, l1_coeff=0.01
+                decorr_coeff=0.01, l1_coeff=0.0
             ).primitive_hyperparams,
         )
         inference_hyperparams = BPDNDFHyperparams(
-            prox_hyperparams=0.7, smooth_coeff=0.4
+            prox_hyperparams=0.3, smooth_coeff=0.1
         )
         inference_backend = BPDNDFNoObsInference()
         dlds_coeffs = inference_backend.infer_batch(
@@ -164,7 +167,6 @@ def fit_infer_hierarchical_model_all_stages(
             trajectories[:, :-1, :],
             trajectories[:, 1:, :],
             inference_hyperparams,
-            model_fit.compute_operator_predictions,
         )
 
         eqx.tree_serialise_leaves(model_path, model_fit)
@@ -175,7 +177,7 @@ def fit_infer_hierarchical_model_all_stages(
     plot_Fs(model.primitives.F)
     fig = plot_coeff_spatial_maps(dlds_coeffs, trajectories, "c")
     fig.suptitle("dLDS inferred coefficients")
-    coords = trajectories[:, :20, :]
+    coords = trajectories[:, :NUM_TIMEPOINTS, :]
     plt.show()
 
     filter_spec = jax.tree_util.tree_map(lambda _: False, model)
@@ -195,9 +197,9 @@ def fit_infer_hierarchical_model_all_stages(
         model,
         samples_per_snippet=20,
         num_snippets=10,
-        max_iter=2000,
+        max_iter=1000,
         lr_init=1,
-        lr_end=1,
+        lr_end=1e-3,
         inference_backend=inference_backend,
         inference_hyperparams=inference_hyperparams,
         filter_spec=filter_spec,
@@ -209,13 +211,12 @@ def fit_infer_hierarchical_model_all_stages(
         prox_reweight_coeff=[200, 0],
         smooth_coeff=0.4,
     )
-    coords = trajectories[:, :20, :]
+    coords = trajectories[:, :NUM_TIMEPOINTS, :]
     mlp_coeffs = inference_backend.infer_batch(
-        model,
+        model.coefficient_model(),
         coords,
         dlds_coeffs,
         inference_hyperparams,
-        model.compute_coeff_predictions,
     )
 
     inference_hyperparams = BPDNDFHyperparams(
@@ -228,7 +229,6 @@ def fit_infer_hierarchical_model_all_stages(
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
         inference_hyperparams,
-        model.compute_operator_predictions,
     )
 
     return model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs
@@ -257,10 +257,10 @@ def plot_hierarchical_model_fit(
     )
     fig = plot_coeff_spatial_maps(dlds_coeffs, trajectories, "c")
     fig.suptitle("dLDS inferred coefficients")
-    coords = trajectories[:, :20, :]
+    coords = trajectories[:, :NUM_TIMEPOINTS, :]
 
     plot_example_trajectories_with_coeffs(
-        mlp_coeffs.reshape(-1, 20, model.num_operators),
+        mlp_coeffs.reshape(-1, NUM_TIMEPOINTS, model.num_operators),
         trajectories,
         plotted_grid,
         plotted_simulation_flows,
@@ -272,7 +272,7 @@ def plot_hierarchical_model_fit(
     per_mlp_dlds_coeff_predictions = model._compute_coeff_predictions_batched(
         model.G, coords.reshape(-1, 2)
     )
-    mlp_combined_dlds_coeff_predictions = model.combine_operator_predictions(
+    mlp_combined_dlds_coeff_predictions = linear_combination(
         mlp_coeffs.reshape(-1, model.num_operators),
         per_mlp_dlds_coeff_predictions,
     )
@@ -331,11 +331,11 @@ def plot_example_trajectories_with_coeffs(
 
 
 def plot_coeff_spatial_maps(coeffs, trajectories, symbol):
-    coords = trajectories[:, :20, :].reshape(-1, 2)
+    coords = trajectories[:, :NUM_TIMEPOINTS, :].reshape(-1, 2)
     coeffs = coeffs.reshape(-1, coeffs.shape[-1])
 
     fig, ax = plt.subplots(
-        figsize=(2 + 3 * coeffs.shape[-1], 3), nrows=1, ncols=coeffs.shape[-1]
+        figsize=(2 + 3 * coeffs.shape[-1] + 2, 3), nrows=1, ncols=coeffs.shape[-1]
     )
     for i in range(coeffs.shape[-1]):
         plot = ax[i].scatter(
@@ -343,7 +343,7 @@ def plot_coeff_spatial_maps(coeffs, trajectories, symbol):
             coords[:, 1],
             c=coeffs[:, i],
             vmin=0,
-            vmax=1.5,
+            # vmax=1.5,
             alpha=0.5,
             s=20,
             cmap="YlGn_r",
@@ -355,12 +355,18 @@ def plot_coeff_spatial_maps(coeffs, trajectories, symbol):
     return fig
 
 
-@click.command(context_settings={"show_default": True, "help_option_names": ["-h", "--help"]})
-@click.option("-n", "--num_trajectories", default=100, help="number of trajectories to sample")
+@click.command(
+    context_settings={"show_default": True, "help_option_names": ["-h", "--help"]}
+)
+@click.option(
+    "-n", "--num_trajectories", default=2000, help="number of trajectories to sample"
+)
 @click.option("--dt", default=0.05, help="time step in seconds for Euler approximation")
 @click.option("--tau", default=0.2, help="timescale in seconds of the flow field")
 @click.option("--sigma", default=0.0, help="white noise variance")
-@click.option("--T", "T", default=5.0, help="duration of sampled trajectories in seconds")
+@click.option(
+    "--T", "T", default=5.0, help="duration of sampled trajectories in seconds"
+)
 @click.option("--seed", default=0, help="random seed")
 @click.option("--min_radius", default=0.0, help="minimum radius of initial conditions")
 @click.option("--max_radius", default=2.0, help="maximum radius of initial conditions")
@@ -374,14 +380,15 @@ def main(**kwargs):
     )
 
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
-    model = HierarchicalDecomposedDynamics(
+    model = HierarchicalDecomposedDeltaDynamics(
         num_nonlinear_operators=6,
         num_primitives=6,
         state_dim=2,
-        primitive_type=DecomposedLinearDynamics,
+        primitive_type=DecomposedLinearDeltaDynamics,
         key=keys[3],
         layer_width=10,
         num_hidden_layers=4,
+        dt=0.05,
     )
     model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs = (
         fit_infer_hierarchical_model_all_stages(model, trajectory_dict, trajectories)

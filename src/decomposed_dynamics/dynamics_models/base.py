@@ -6,6 +6,10 @@ import jax.numpy as jnp
 from jax import Array
 
 
+def linear_combination(c: Array, preds: Array) -> Array:
+    return jnp.einsum("...k, ...ki -> ...i", c, preds)
+
+
 class OperatorHyperparams(ABC):
     pass
 
@@ -39,5 +43,25 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @eqx.filter_jit
-    def combine_operator_predictions(self, c: Array, flows: Array) -> Array:
-        return jnp.einsum("...k, ...ki -> ...i", c, flows)
+    def combine_operator_predictions(self, x: Array, c: Array, preds: Array) -> Array:
+        return linear_combination(c, preds)
+
+    def compute_operator_flows(self, x: Array) -> Array:
+        return self.compute_operator_predictions(x) - x[..., None, :]
+
+
+class DeltaDynamics(DecomposedDynamicsModel):
+    """Operators predict velocities, stepped forward with an Euler step of size `dt`."""
+
+    dt: float = eqx.field(static=True)
+
+    def __init__(self, *args, dt: float, **kwargs):
+        self.dt = dt
+        super().__init__(*args, **kwargs)
+
+    @eqx.filter_jit
+    def combine_operator_predictions(self, x: Array, c: Array, preds: Array) -> Array:
+        return x + self.dt * linear_combination(c, preds)
+
+    def compute_operator_flows(self, x: Array) -> Array:
+        return self.compute_operator_predictions(x)

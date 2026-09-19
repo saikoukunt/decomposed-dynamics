@@ -15,7 +15,7 @@ from decomposed_dynamics.proximal_operators import _reweight_prox_hyperparams
 class InferenceHyperparams(eqx.Module):
     max_iter: int = 1000
     tol: float = 1e-4
-    dynamics_loss_coeff: Array = eqx.field(default=0.0, converter=jnp.array)
+    dynamics_loss_coeff: Array = eqx.field(default=1.0, converter=jnp.array)
 
     @classmethod
     def get_backend(
@@ -66,13 +66,11 @@ class NoObsInferenceBackend(ABC):
         states: Array,
         targets: Array,
         hyperparams: InferenceHyperparams,
-        compute_per_operator_predictions: Callable,
     ) -> Array:
 
         infer_trial = functools.partial(
             self.infer_trial,
             dynamics_model,
-            compute_per_operator_predictions,
             hyperparams=hyperparams,
         )
         return vmap(infer_trial)(states, targets)
@@ -81,7 +79,6 @@ class NoObsInferenceBackend(ABC):
     def infer_trial(
         self,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         states: Array,
         targets: Array,
         hyperparams: InferenceHyperparams,
@@ -101,14 +98,12 @@ class InferenceBackend(ABC):
         dynamics_model: DecomposedDynamicsModel,
         observations: Array,
         hyperparams: InferenceHyperparams,
-        compute_per_operator_predictions: Callable,
     ) -> tuple[Array, Array]:
 
         infer_trial = functools.partial(
             self.infer_trial,
             observation_model,
             dynamics_model,
-            compute_per_operator_predictions,
             hyperparams=hyperparams,
         )
         state = vmap(infer_trial)(observations)
@@ -123,7 +118,6 @@ class InferenceBackend(ABC):
         self,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
-        compute_per_operator_predictions: Callable,
         observations: Array,
         hyperparams: InferenceHyperparams,
     ) -> Array:

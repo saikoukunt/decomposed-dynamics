@@ -8,6 +8,7 @@ from jax import Array, grad
 
 from decomposed_dynamics.dynamics_models.base import (
     DecomposedDynamicsModel,
+    DeltaDynamics,
     OperatorHyperparams,
 )
 from decomposed_dynamics.dynamics_models.regularization import (
@@ -85,3 +86,7 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
         F = F - operator_decorr_coeff * decorr_gradient
 
         return F
+
+
+class DecomposedLinearDeltaDynamics(DeltaDynamics, DecomposedLinearDynamics):
+    pass

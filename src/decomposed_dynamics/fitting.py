@@ -79,7 +79,6 @@ def fit(
                 latents[:, :-1, :],
                 latents[:, 1:, :],
                 inference_hyperparams,
-                dynamics_model.compute_operator_predictions,
             )
         else:
             latents, operator_coeffs = inference_backend.infer_batch(
@@ -87,7 +86,6 @@ def fit(
                 dynamics_model,
                 snippets,
                 inference_hyperparams,
-                dynamics_model.compute_operator_predictions,
             )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
@@ -182,11 +180,16 @@ def compute_dynamics_recon_loss_sequence(
     operator_coeffs: Array,
 ):
     flows = dynamics_model.compute_operator_predictions(states[:-1, :])
-    predictions = dynamics_model.combine_operator_predictions(operator_coeffs, flows)
+    predictions = dynamics_model.combine_operator_predictions(
+        states[:-1, :], operator_coeffs, flows
+    )
+    null_predictions = dynamics_model.combine_operator_predictions(
+        states[:-1, :], jnp.zeros_like(operator_coeffs), flows
+    )
     mse = l2_loss(predictions, states[1:, :]).sum(axis=-1).mean()
 
     variance = jnp.maximum(
-        l2_loss(jnp.zeros_like(predictions), states[1:, :]).sum(axis=-1).mean(), 1e-4
+        l2_loss(null_predictions, states[1:, :]).sum(axis=-1).mean(), 1e-4
     )
 
     return mse / variance
