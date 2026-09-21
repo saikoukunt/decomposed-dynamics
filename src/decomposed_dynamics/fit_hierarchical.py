@@ -1,9 +1,11 @@
 import functools
 from dataclasses import replace
+from typing import Callable
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import optax
 from jax import Array, vmap
 from jaxopt import ProximalGradient
 from optax import l2_loss
@@ -15,10 +17,14 @@ from decomposed_dynamics.dynamics_models import (
 )
 from decomposed_dynamics.inference import (
     BPDNDFNoObsInference,
-    NoObsInferenceBackend,
     InferenceHyperparams,
+    NoObsInferenceBackend,
 )
-from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
+from decomposed_dynamics.utils import (
+    eqx_module_to_string,
+    extract_snippets,
+    make_filter_spec,
+)
 
 
 def fit_hierarchical_mlps(
@@ -29,18 +35,24 @@ def fit_hierarchical_mlps(
     num_snippets: int,
     lr_init: float,
     lr_end: float,
-    filter_spec: HierarchicalDecomposedDynamics,
     max_iter: int = 200,
+    frozen: Callable = lambda model: model.primitives,
     inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
     inference_hyperparams: dict | InferenceHyperparams = {},
     prox_hyperparams_max: float = 0.4,
 ) -> HierarchicalDecomposedDynamics:
 
     progress_bar = trange(max_iter)
+    filter_spec = make_filter_spec(dynamics_model, frozen)
 
-    lr = jnp.linspace(lr_init, lr_end, max_iter)
+    optimizer = optax.adam(optax.linear_schedule(lr_init, lr_end, max_iter))
+    opt_state = optimizer.init(
+        eqx.filter(eqx.filter(dynamics_model, filter_spec), eqx.is_inexact_array)
+    )
     prox_hyperparams_schedule = jnp.linspace(
-        inference_hyperparams.prox_hyperparams, jnp.array(prox_hyperparams_max), int(max_iter / 2)
+        inference_hyperparams.prox_hyperparams,
+        jnp.array(prox_hyperparams_max),
+        int(max_iter / 2),
     )
 
     for i in progress_bar:
@@ -61,6 +73,10 @@ def fit_hierarchical_mlps(
             C_batch,
             inference_hyperparams,
         )
+        # if i == 0:
+        #     print(C_batch.shape)
+        # mlp_coeffs = jnp.zeros((10, 20, 6))
+        # mlp_coeffs = mlp_coeffs.at[:, :, 0].set(1.0)
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
             dynamics_model, filter_spec
@@ -69,10 +85,11 @@ def fit_hierarchical_mlps(
             diff_dynamics_model, static_dynamics_model, mlp_coeffs, C_batch, latents
         )
 
-        updated_model, delta_model = update_dynamics_model(
+        updated_model, opt_state, delta_model = update_dynamics_model(
             dynamics_model,
             recon_grads,
-            lr[i],
+            optimizer,
+            opt_state,
         )
 
         delta_str = f"Recon. Loss: {recon_loss:.4f}"
@@ -88,10 +105,11 @@ def fit_hierarchical_mlps(
 def update_dynamics_model(
     dynamics_model: HierarchicalDecomposedDynamics,
     grads: HierarchicalDecomposedDynamics,
-    lr: Array,
+    optimizer: optax.GradientTransformation,
+    opt_state,
 ):
 
-    grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
+    grad_updates, opt_state = optimizer.update(grads, opt_state)
     updated_model = eqx.apply_updates(dynamics_model, grad_updates)
 
     delta_params = jax.tree.map(
@@ -100,7 +118,7 @@ def update_dynamics_model(
         eqx.filter(dynamics_model, eqx.is_inexact_array),
     )
 
-    return updated_model, delta_params
+    return updated_model, opt_state, delta_params
 
 
 def fine_tune_hierarchical():
@@ -180,6 +198,7 @@ def recon_loss_diff_batched(
     weights = jnp.linalg.norm(jnp.diff(latents, axis=1), axis=-1) ** 2
     weights = jnp.hstack((weights, jnp.expand_dims(weights[:, -1], axis=1)))
     weights = weights / weights.sum()
+    weights = jnp.ones_like(weights)
     recon_loss = loss(
         diff_model,
         static_model,
@@ -189,7 +208,7 @@ def recon_loss_diff_batched(
         weights,
     )
 
-    return recon_loss.sum()
+    return recon_loss.mean()
 
 
 recon_loss_value_and_grad = eqx.filter_jit(
