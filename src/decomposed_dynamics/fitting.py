@@ -1,3 +1,5 @@
+from typing import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -15,7 +17,12 @@ from decomposed_dynamics.inference import (
     NoObsInferenceBackend,
 )
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
+from decomposed_dynamics.utils import (
+    eqx_module_to_string,
+    extract_snippets,
+    keep_frozen,
+    make_filter_spec,
+)
 
 
 def fit(
@@ -30,10 +37,13 @@ def fit(
     inference_backend: InferenceBackend | NoObsInferenceBackend | None = None,
     inference_hyperparams: InferenceHyperparams = None,
     model_update_hyperparams: dict | OperatorHyperparams = {},
-    filter_spec=None,
+    frozen: Callable | None = None,
     prox_hyperparams_end: None | float = None,
 ) -> tuple[ObservationModel | None, DecomposedDynamicsModel]:
-    """Fit `dynamics_model`, jointly with `observation_model` when one is given."""
+    """Fit `dynamics_model`, jointly with `observation_model` when one is given.
+
+    `frozen(dynamics_model, observation_model)` selects the parts to keep fixed.
+    """
 
     # TODO: wrap parameter initialization into a function
     if inference_backend is None and inference_hyperparams is None:
@@ -48,8 +58,10 @@ def fit(
             **model_update_hyperparams
         )
 
-    if filter_spec is None:
-        filter_spec = jax.tree_util.tree_map(lambda _: True, dynamics_model)
+    dynamics_filter_spec, obs_filter_spec = make_filter_spec(
+        (dynamics_model, observation_model),
+        None if frozen is None else lambda models: frozen(*models),
+    )
 
     if lr_end is None:
         lr_end = lr_init
@@ -89,7 +101,7 @@ def fit(
             )
 
         diff_dynamics_model, static_dynamics_model = eqx.partition(
-            dynamics_model, filter_spec
+            dynamics_model, dynamics_filter_spec
         )
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
             diff_dynamics_model, static_dynamics_model, latents, operator_coeffs
@@ -100,16 +112,20 @@ def fit(
             lr[i],
             model_update_hyperparams,
             latents,
+            dynamics_filter_spec,
         )
 
         delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
 
         if observation_model is not None:
+            diff_obs_model, static_obs_model = eqx.partition(
+                observation_model, obs_filter_spec
+            )
             data_nll, data_nll_grads = data_nll_value_and_grad(
-                observation_model, snippets, latents
+                diff_obs_model, static_obs_model, snippets, latents
             )
             observation_model, delta_obs_model = update_observation_model(
-                observation_model, data_nll_grads, lr[i]
+                observation_model, data_nll_grads, lr[i], obs_filter_spec
             )
             delta_str = f"Data NLL: {data_nll:.4f}, " + delta_str
             delta_str += eqx_module_to_string(delta_obs_model)
@@ -125,10 +141,11 @@ def update_observation_model(
     obs_model: ObservationModel,
     grads,
     lr,
+    filter_spec: ObservationModel,
 ):
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(obs_model, grad_updates)
-    updated_model = updated_model.apply_prox()
+    updated_model = keep_frozen(updated_model.apply_prox(), obs_model, filter_spec)
 
     delta_params = jax.tree.map(
         lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
@@ -146,11 +163,16 @@ def update_dynamics_model(
     lr,
     hyperparams: OperatorHyperparams,
     latents: Array,
+    filter_spec: DecomposedDynamicsModel,
 ):
 
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(dynamics_model, grad_updates)
-    updated_model = updated_model.regularize_operators(hyperparams, latents)
+    updated_model = keep_frozen(
+        updated_model.regularize_operators(hyperparams, latents),
+        dynamics_model,
+        filter_spec,
+    )
 
     delta_params = jax.tree.map(
         lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
@@ -202,10 +224,12 @@ dynamics_recon_value_and_grad = eqx.filter_jit(
 
 @eqx.filter_jit
 def compute_data_nll(
-    obs_model: ObservationModel,
+    diff_obs_model: ObservationModel,
+    static_obs_model: ObservationModel,
     observations: Array,
     latents: Array,
 ):
+    obs_model = eqx.combine(diff_obs_model, static_obs_model)
     rates = obs_model.predict_rates(latents)
     return obs_model.neg_log_likelihood(rates, observations)
 

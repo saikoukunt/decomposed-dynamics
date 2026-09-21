@@ -1,3 +1,6 @@
+from typing import Callable
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -78,3 +81,18 @@ def eqx_module_to_string(module):
         str += f", Avg \U0001d6ab{jax.tree_util.keystr(path)[1:]}: {val:.5f}"
 
     return str
+
+
+def make_filter_spec(model, frozen: Callable | None = None):
+    filter_spec = jax.tree.map(lambda _: True, model)
+    if frozen is None:
+        return filter_spec
+    return eqx.tree_at(frozen, filter_spec, replace_fn=lambda _: False)
+
+
+def keep_frozen(updated_model, model, filter_spec):
+    """Undo changes (e.g. from prox steps) to the frozen parts of `model`."""
+    return eqx.combine(
+        eqx.filter(updated_model, filter_spec),
+        eqx.filter(model, filter_spec, inverse=True),
+    )

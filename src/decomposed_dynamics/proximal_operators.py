@@ -48,6 +48,7 @@ def prox_l1_binary(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any
     l1_coeff = hyperparams_prox[..., 0]
     _lambda = hyperparams_prox[..., 1]
     x = prox_non_negative_lasso(x, l1_coeff, scaling)
+    x = jnp.clip(x, max=1)
     x = prox_binary(x, _lambda, scaling)
 
     return x
