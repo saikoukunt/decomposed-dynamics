@@ -1,6 +1,6 @@
 import functools
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Any, Callable
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -9,7 +9,7 @@ from jaxopt import ProximalGradient
 
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.observation_models.base import ObservationModel
-from decomposed_dynamics.proximal_operators import _reweight_prox_hyperparams
+from decomposed_dynamics.proximal_operators import reweight_prox_hyperparams
 
 
 class InferenceHyperparams(eqx.Module):
@@ -27,7 +27,7 @@ class InferenceHyperparams(eqx.Module):
 def _prox_coeffs_only(prox: Callable, num_latents: int) -> Callable:
     """Apply `prox` to the operator coefficients of a `[latents, coeffs]` state only."""
 
-    def wrapped(x: Array, hyperparams_prox: Array, scaling: float = 1.0) -> Array:
+    def wrapped(x: Array, hyperparams_prox: Any, scaling: float = 1.0) -> Array:
         latents, coeffs = x[..., :num_latents], x[..., num_latents:]
         return jnp.concatenate(
             [latents, prox(coeffs, hyperparams_prox, scaling)], axis=-1
@@ -39,9 +39,9 @@ def _prox_coeffs_only(prox: Callable, num_latents: int) -> Callable:
 def solve_reweighted(
     solver: ProximalGradient,
     init: Array,
-    prox_hyperparams: Array,
-    prox_reweight_coeff: Array,
-    reweight: Callable = _reweight_prox_hyperparams,
+    prox_hyperparams: Array | tuple[Array, ...],
+    prox_reweight_coeff: Array | tuple[Array, ...],
+    reweight: Callable = reweight_prox_hyperparams,
     **loss_kwargs,
 ) -> Array:
     solution, _ = solver.run(init, hyperparams_prox=prox_hyperparams, **loss_kwargs)

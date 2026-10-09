@@ -8,19 +8,28 @@ from jaxopt.prox import prox_lasso, prox_non_negative_lasso
 
 @jit
 def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Array:
-    reweighted_coeffs = _reweight_prox_hyperparams(x, l1_coeff, reweight_coeff)
+    reweighted_coeffs = reweight_prox_hyperparams(x, l1_coeff, reweight_coeff)
     x = jnp.sign(x) * jnp.maximum(jnp.abs(x) - reweighted_coeffs, 0)
 
     return x
 
 
-# WARN: this means x can't be 1D
+def as_prox_hyperparams(x: Any) -> Array | tuple[Array, ...]:
+    """A tuple holds one entry per hyperparameter; anything else is a single one."""
+    return tuple(map(jnp.asarray, x)) if isinstance(x, tuple) else jnp.asarray(x)
+
+
 @jit
-def _reweight_prox_hyperparams(
-    x: Array, prox_hyperparams: Array, reweight_coeff: float = 200
-) -> Array:
-    denominator = 1 + reweight_coeff[jnp.newaxis, ...] * jnp.abs(x)[..., jnp.newaxis]
-    return jnp.squeeze(prox_hyperparams[jnp.newaxis, ...] / denominator)
+def reweight_prox_hyperparams(
+    x: Array,
+    prox_hyperparams: Array | tuple[Array, ...],
+    reweight_coeff: Array | tuple[Array, ...],
+) -> Array | tuple[Array, ...]:
+    return jax.tree.map(
+        lambda hyperparam, reweight: hyperparam / (1 + reweight * jnp.abs(x)),
+        prox_hyperparams,
+        reweight_coeff,
+    )
 
 
 def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -> Any:
@@ -44,11 +53,12 @@ def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -
     return tree_util.tree_map(prox, x)
 
 
-def prox_l1_binary(x: Any, hyperparams_prox: Array, scaling: float = 1.0) -> Any:
-    l1_coeff = hyperparams_prox[..., 0]
-    _lambda = hyperparams_prox[..., 1]
+def prox_l1_binary(
+    x: Any, hyperparams_prox: tuple[Array, Array], scaling: float = 1.0
+) -> Any:
+    l1_coeff, _lambda = hyperparams_prox
     x = prox_non_negative_lasso(x, l1_coeff, scaling)
-    x = jnp.clip(x, max=1)
+    x = jnp.clip(x, max=1.1)
     x = prox_binary(x, _lambda, scaling)
 
     return x
@@ -86,9 +96,8 @@ def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
 
 
 def prox_l1_unit_tv(
-    x: Any, hyperparams_prox: Array | tuple[Array, Array], scaling: float = 1.0
+    x: Any, hyperparams_prox: tuple[Array, Array], scaling: float = 1.0
 ) -> Any:
-    # unpacks both a (2,) array and the per-entry (l1, tv) weights from reweighting
     l1_coeff, _lambda = hyperparams_prox
     x = prox_unit_tv(x, _lambda, scaling)
     x = prox_lasso(x, l1_coeff, scaling)

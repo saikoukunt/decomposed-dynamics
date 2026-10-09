@@ -96,3 +96,7 @@ def keep_frozen(updated_model, model, filter_spec):
         eqx.filter(updated_model, filter_spec),
         eqx.filter(model, filter_spec, inverse=True),
     )
+
+
+def interpolate(start, end, frac: float):
+    return jax.tree.map(lambda a, b: a + frac * (b - a), start, end)

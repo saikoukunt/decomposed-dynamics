@@ -20,9 +20,11 @@ from decomposed_dynamics.inference import (
     InferenceHyperparams,
     NoObsInferenceBackend,
 )
+from decomposed_dynamics.proximal_operators import as_prox_hyperparams
 from decomposed_dynamics.utils import (
     eqx_module_to_string,
     extract_snippets,
+    interpolate,
     make_filter_spec,
 )
 
@@ -39,7 +41,7 @@ def fit_hierarchical_mlps(
     frozen: Callable = lambda model: model.primitives,
     inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
     inference_hyperparams: dict | InferenceHyperparams = {},
-    prox_hyperparams_max: float = 0.4,
+    prox_hyperparams_max: float | tuple = 0.4,
 ) -> HierarchicalDecomposedDynamics:
 
     progress_bar = trange(max_iter)
@@ -49,24 +51,19 @@ def fit_hierarchical_mlps(
     opt_state = optimizer.init(
         eqx.filter(eqx.filter(dynamics_model, filter_spec), eqx.is_inexact_array)
     )
-    prox_hyperparams_schedule = jnp.linspace(
-        inference_hyperparams.prox_hyperparams,
-        jnp.array(prox_hyperparams_max),
-        int(max_iter / 2),
-    )
+    prox_hyperparams_start = inference_hyperparams.prox_hyperparams
+    prox_hyperparams_max = as_prox_hyperparams(prox_hyperparams_max)
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
         C_batch, _ = extract_snippets(C, num_snippets, samples_per_snippet, seed=i)
 
-        if i < max_iter / 2:
-            inference_hyperparams = replace(
-                inference_hyperparams, prox_hyperparams=prox_hyperparams_schedule[i]
-            )
-        else:
-            inference_hyperparams = replace(
-                inference_hyperparams, prox_hyperparams=prox_hyperparams_schedule[-1]
-            )
+        inference_hyperparams = replace(
+            inference_hyperparams,
+            prox_hyperparams=interpolate(
+                prox_hyperparams_start, prox_hyperparams_max, min(2 * i / max_iter, 1)
+            ),
+        )
         mlp_coeffs = inference_backend.infer_batch(
             dynamics_model.coefficient_model(),
             latents,

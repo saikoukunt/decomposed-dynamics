@@ -21,12 +21,19 @@ from decomposed_dynamics.loss_functions import (
     normalized_dynamics_reconstruction_loss,
 )
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.proximal_operators import _reweight_prox_hyperparams
+from decomposed_dynamics.proximal_operators import (
+    as_prox_hyperparams,
+    reweight_prox_hyperparams,
+)
 
 
 class BPDNDFHyperparams(InferenceHyperparams):
-    prox_hyperparams: Array = eqx.field(default=0.25, converter=jnp.array)
-    prox_reweight_coeff: Array = eqx.field(default=200.0, converter=jnp.array)
+    prox_hyperparams: Array | tuple[Array, ...] = eqx.field(
+        default=0.25, converter=as_prox_hyperparams
+    )
+    prox_reweight_coeff: Array | tuple[Array, ...] = eqx.field(
+        default=200.0, converter=as_prox_hyperparams
+    )
     smooth_coeff: Array = eqx.field(default=0.4, converter=jnp.array)
 
     @override
@@ -288,7 +295,7 @@ class BPDNDFInference(InferenceBackend):
             hyperparams.prox_hyperparams,
             hyperparams.prox_reweight_coeff,
             reweight=lambda state, prox_hyperparams, reweight_coeff: (
-                _reweight_prox_hyperparams(
+                reweight_prox_hyperparams(
                     state[..., dynamics_model.state_dim :],
                     prox_hyperparams,
                     reweight_coeff,

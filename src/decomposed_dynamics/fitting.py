@@ -17,9 +17,11 @@ from decomposed_dynamics.inference import (
     NoObsInferenceBackend,
 )
 from decomposed_dynamics.observation_models import ObservationModel
+from decomposed_dynamics.proximal_operators import as_prox_hyperparams
 from decomposed_dynamics.utils import (
     eqx_module_to_string,
     extract_snippets,
+    interpolate,
     keep_frozen,
     make_filter_spec,
 )
@@ -38,7 +40,7 @@ def fit(
     inference_hyperparams: InferenceHyperparams = None,
     model_update_hyperparams: dict | OperatorHyperparams = {},
     frozen: Callable | None = None,
-    prox_hyperparams_end: None | float = None,
+    prox_hyperparams_end: None | float | tuple = None,
 ) -> tuple[ObservationModel | None, DecomposedDynamicsModel]:
     """Fit `dynamics_model`, jointly with `observation_model` when one is given.
 
@@ -67,10 +69,11 @@ def fit(
         lr_end = lr_init
     lr = jnp.linspace(lr_init, lr_end, max_iter)
 
-    if prox_hyperparams_end is None:
-        prox_hyperparams_end = inference_hyperparams.prox_hyperparams
-    prox_hyperparams_schedule = jnp.linspace(
-        inference_hyperparams.prox_hyperparams, prox_hyperparams_end, int(max_iter / 2)
+    prox_hyperparams_start = inference_hyperparams.prox_hyperparams
+    prox_hyperparams_end = (
+        prox_hyperparams_start
+        if prox_hyperparams_end is None
+        else as_prox_hyperparams(prox_hyperparams_end)
     )
 
     progress_bar = trange(max_iter)
@@ -81,7 +84,9 @@ def fit(
         inference_hyperparams = eqx.tree_at(
             lambda hyperparams: hyperparams.prox_hyperparams,
             inference_hyperparams,
-            prox_hyperparams_schedule[min(i, prox_hyperparams_schedule.shape[0] - 1)],
+            interpolate(
+                prox_hyperparams_start, prox_hyperparams_end, min(2 * i / max_iter, 1)
+            ),
         )
 
         if observation_model is None:
