@@ -1,19 +1,22 @@
 import os
 import sys
+from types import SimpleNamespace
 
+import click
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
 
 from decomposed_dynamics.dynamics_models import MLPDecomposedDynamics
+from decomposed_dynamics.dynamics_models.mlp import visited_grid
 from decomposed_dynamics.fitting import fit
 from decomposed_dynamics.inference import BPDNDFHyperparams, BPDNDFNoObsInference
 from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from test_ring_attractor import main as ring_attractor_main
 from test_ring_attractor import (
-    parse_args,
     plot_coeff_spatial_maps,
     plot_example_trajectories_with_coeffs,
     plot_MLP_flow_field,
@@ -22,10 +25,12 @@ from test_ring_attractor import (
 )
 
 
-def main():
-    args = parse_args(sys.argv[1:])
-    if args is None:
-        return
+@click.command(
+    params=ring_attractor_main.params,
+    context_settings=ring_attractor_main.context_settings,
+)
+def main(**kwargs):
+    args = SimpleNamespace(**kwargs)
 
     keys = jr.split(jr.key(args.seed), 6)
     simulation, trajectories = simulate_ring_attractor(args, keys)
@@ -36,8 +41,8 @@ def main():
     )
     inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
     inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=jnp.array([0.7, 0.4]),
-        prox_reweight_coeff=jnp.array([200, 0.0]),
+        prox_hyperparams=([0.0, 100, 100, 100, 100, 100], 0.5),
+        prox_reweight_coeff=(200, 0.0),
         smooth_coeff=0,
     )
     _, model = fit(
@@ -45,17 +50,19 @@ def main():
         model,
         samples_per_snippet=20,
         num_snippets=50,
-        max_iter=2000,
-        lr_init=1,
+        max_iter=5000,
+        lr_init=1e-2,
         lr_end=1e-4,
         inference_backend=inference_backend,
         inference_hyperparams=inference_hyperparams,
-        model_update_hyperparams=model.initialize_hyperparams(decorr_coeff=0.0),
-        prox_hyperparams_end=jnp.array([0.7, 0.4]),
+        model_update_hyperparams=model.initialize_hyperparams(
+            normalization_grid=visited_grid(trajectories), decorr_coeff=0.0
+        ),
+        prox_hyperparams_end=([0.1, 100, 100, 100, 100, 100], 0.5),
     )
     inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=jnp.array([0.7, 0.4]),
-        prox_reweight_coeff=jnp.array([200, 0.0]),
+        prox_hyperparams=([0.5, 100, 100, 100, 100, 100], 0.5),
+        prox_reweight_coeff=(200, 0.0),
     )
 
     mlp_coeffs = inference_backend.infer_batch(

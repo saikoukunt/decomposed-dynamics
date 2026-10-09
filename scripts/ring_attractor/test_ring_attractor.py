@@ -207,8 +207,8 @@ def fit_infer_hierarchical_model_all_stages(
 
     inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
     inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=[0.1, 0.1],
-        prox_reweight_coeff=[200, 0],
+        prox_hyperparams=(0.1, 0.1),
+        prox_reweight_coeff=(200, 0),
         smooth_coeff=0,
     )
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
@@ -225,12 +225,12 @@ def fit_infer_hierarchical_model_all_stages(
         lr_end=1e-3,
         inference_backend=inference_backend,
         inference_hyperparams=inference_hyperparams,
-        prox_hyperparams_max=[0.4, 0.4],
+        prox_hyperparams_max=(0.4, 0.4),
     )
 
     inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=[0, 0.4],
-        prox_reweight_coeff=[200, 0],
+        prox_hyperparams=(0, 0.4),
+        prox_reweight_coeff=(200, 0),
         smooth_coeff=0.4,
     )
     coords = trajectories[:, :NUM_TIMEPOINTS, :]
@@ -242,8 +242,8 @@ def fit_infer_hierarchical_model_all_stages(
     )
 
     inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=[0, 0.4],
-        prox_reweight_coeff=[0, 0],
+        prox_hyperparams=(0, 0.4),
+        prox_reweight_coeff=(0, 0),
         smooth_coeff=0.4,
     )
     reinferred_mlp_coeffs = inference_backend.infer_batch(

@@ -197,8 +197,8 @@ def main():
     model, true_coeffs, states, targets = simulate_sparse_switching_dynamics(args, keys)
 
     inference_hyperparams = FusedLassoHyperparams(
-        prox_hyperparams=jnp.array([args.l1_coeff, args.tv_coeff]),
-        prox_reweight_coeff=jnp.array([args.l1_reweight_coeff, args.tv_reweight_coeff]),
+        prox_hyperparams=(args.l1_coeff, args.tv_coeff),
+        prox_reweight_coeff=(args.l1_reweight_coeff, args.tv_reweight_coeff),
     )
     inference_backend = inference_hyperparams.get_backend()
     inferred_coeffs = inference_backend.infer_batch(
