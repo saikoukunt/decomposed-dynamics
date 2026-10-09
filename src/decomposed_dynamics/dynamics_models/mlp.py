@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Callable, Self, override
 
 import equinox as eqx
@@ -15,9 +14,15 @@ from decomposed_dynamics.dynamics_models.base import (
 from decomposed_dynamics.dynamics_models.regularization import operator_flow_correlation
 
 
-@dataclass(frozen=True)
-class MLPOperatorHyperparams(OperatorHyperparams):
-    decorr_coeff: Array = 0.01
+class MLPOperatorHyperparams(OperatorHyperparams, eqx.Module):
+    normalization_grid: Array
+    decorr_coeff: float = 0.01
+
+
+def visited_grid(x: Array, bin_width: float = 0.1) -> Array:
+    """Centers of the grid bins visited by any point in `x`."""
+    bins = jnp.unique(jnp.floor(x.reshape(-1, x.shape[-1]) / bin_width), axis=0)
+    return (bins + 0.5) * bin_width
 
 
 class MLPDecomposedDynamics(DecomposedDynamicsModel):
@@ -98,7 +103,19 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
     ) -> Self:
         updated_model = self.decorrelate_operators(latents, hyperparams.decorr_coeff)
 
-        return updated_model
+        return updated_model.normalize_operators(hyperparams.normalization_grid)
+
+    @eqx.filter_jit
+    def normalize_operators(self, grid: Array) -> Self:
+        """Rescale the last layers so each operator's mean norm over `grid` is 1."""
+        norms = jnp.linalg.norm(self.compute_operator_predictions(grid), axis=-1)
+        scale = norms.mean(axis=0)
+        last = self.G.layers[-1]
+        return eqx.tree_at(
+            lambda m: (m.G.layers[-1].weight, m.G.layers[-1].bias),
+            self,
+            (last.weight / scale[:, None, None], last.bias / scale[:, None]),
+        )
 
     @eqx.filter_jit
     def apply_prox(self, **kwargs) -> eqx.nn.MLP:
