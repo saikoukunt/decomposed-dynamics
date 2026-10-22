@@ -23,6 +23,8 @@ from decomposed_dynamics.loss_functions import (
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.proximal_operators import (
     as_prox_hyperparams,
+    prox_l1_group_lasso_binary,
+    reweight_grouped_prox_hyperparams,
     reweight_prox_hyperparams,
 )
 
@@ -211,6 +213,79 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
             dynamics_model, states, coeffs, targets, per_operator_predictions
         ).sum()
         smoothness_loss = coeff_smoothness_loss(coeffs[1:], coeffs[:-1]).sum()
+
+        return recon_loss + smooth_coeff * smoothness_loss
+
+
+@dataclass(frozen=True)
+class BPDNDFBatchNoObsInference(NoObsInferenceBackend):
+    prox: Callable = prox_l1_group_lasso_binary
+
+    @override
+    @staticmethod
+    def initialize_hyperparams(**kwargs) -> BPDNDFHyperparams:
+        return BPDNDFHyperparams(**kwargs)
+
+    @override
+    @eqx.filter_jit
+    def infer_batch(
+        self,
+        dynamics_model: DecomposedDynamicsModel,
+        states: Array,
+        targets: Array,
+        hyperparams: BPDNDFHyperparams,
+    ) -> Array:
+
+        per_operator_predictions = vmap(
+            vmap(dynamics_model.compute_operator_predictions)
+        )(states)
+        solver = ProximalGradient(
+            functools.partial(
+                self.bpdn_df_smooth_loss,
+                dynamics_model=dynamics_model,
+                per_operator_predictions=per_operator_predictions,
+                states=states,
+                targets=targets,
+                smooth_coeff=hyperparams.smooth_coeff,
+            ),
+            self.prox,
+            maxiter=hyperparams.max_iter,
+            tol=hyperparams.tol,
+        )
+
+        return solve_reweighted(
+            solver,
+            jnp.zeros((*states.shape[:2], dynamics_model.num_operators)),
+            hyperparams.prox_hyperparams,
+            hyperparams.prox_reweight_coeff,
+            reweight=reweight_grouped_prox_hyperparams,
+        )
+
+    @override
+    def infer_trial(
+        self,
+        dynamics_model: DecomposedDynamicsModel,
+        states: Array,
+        targets: Array,
+        hyperparams: BPDNDFHyperparams,
+    ) -> Array:
+        raise ValueError("batch BPDNDF can't infer for single trials!")
+
+    @staticmethod
+    @eqx.filter_jit
+    def bpdn_df_smooth_loss(
+        coeffs: Array,
+        dynamics_model: DecomposedDynamicsModel,
+        per_operator_predictions: Array,
+        states: Array,
+        targets: Array,
+        smooth_coeff: Array,
+    ) -> Array:
+
+        recon_loss = normalized_dynamics_reconstruction_loss(
+            dynamics_model, states, coeffs, targets, per_operator_predictions
+        ).sum()
+        smoothness_loss = coeff_smoothness_loss(coeffs[:, 1:], coeffs[:, :-1]).sum()
 
         return recon_loss + smooth_coeff * smoothness_loss
 

@@ -6,6 +6,7 @@ from decomposed_dynamics.inference.base import (
     solve_reweighted,
 )
 from decomposed_dynamics.inference.bpdn import (
+    BPDNDFBatchNoObsInference,
     BPDNDFHyperparams,
     BPDNDFInference,
     BPDNDFJointNoObsInference,

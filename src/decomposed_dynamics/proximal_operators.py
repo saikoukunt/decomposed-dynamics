@@ -1,9 +1,12 @@
+import math
 from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
-from jax import Array, jit, tree_util
-from jaxopt.prox import prox_lasso, prox_non_negative_lasso
+from jax import Array, jit, tree_util, vmap
+from jaxopt.prox import prox_group_lasso, prox_lasso, prox_non_negative_lasso
+
+GROUP_PENALTY_INDEX = 1
 
 
 @jit
@@ -58,10 +61,48 @@ def prox_l1_binary(
 ) -> Any:
     l1_coeff, _lambda = hyperparams_prox
     x = prox_non_negative_lasso(x, l1_coeff, scaling)
-    x = jnp.clip(x, max=1.1)
+    x = jnp.clip(x, max=1.0)
     x = prox_binary(x, _lambda, scaling)
 
     return x
+
+
+def _group_size(x: Array) -> int:
+    return math.prod(x.shape[:-1])
+
+
+def prox_l1_group_lasso_binary(
+    x: Array, hyperparams_prox: tuple[Array, Array, Array], scaling: float = 1.0
+) -> Array:
+    l1_coeff, group_lasso_coeff, _lambda = hyperparams_prox
+    group_lasso_coeff = jnp.broadcast_to(
+        group_lasso_coeff * jnp.sqrt(_group_size(x)), x.shape[-1:]
+    )
+
+    x = prox_non_negative_lasso(x, l1_coeff, scaling)
+    x = jnp.clip(x, max=1.0)
+    x = vmap(prox_group_lasso, in_axes=(-1, 0, None), out_axes=-1)(
+        x, group_lasso_coeff, scaling
+    )
+    x = prox_binary(x, _lambda, scaling)
+
+    return x
+
+
+def reweight_grouped_prox_hyperparams(
+    x: Array,
+    prox_hyperparams: tuple[Array, Array, Array],
+    reweight_coeff: tuple[Array, Array, Array],
+) -> tuple[Array, Array, Array]:
+    reweighted = list(reweight_prox_hyperparams(x, prox_hyperparams, reweight_coeff))
+    group_norms = jnp.linalg.norm(x, axis=tuple(range(x.ndim - 1))) / jnp.sqrt(
+        _group_size(x)
+    )
+    reweighted[GROUP_PENALTY_INDEX] = prox_hyperparams[GROUP_PENALTY_INDEX] / (
+        1 + reweight_coeff[GROUP_PENALTY_INDEX] * group_norms
+    )
+
+    return tuple(reweighted)
 
 
 def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
@@ -76,7 +117,7 @@ def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
         return jnp.concatenate([-p[:1, :], p[:-1, :] - p[1:, :], p[-1:, :]], axis=0)
 
     def project_on_C(u):
-        return jnp.clip(u, 0.0, 1.0)
+        return jnp.clip(u, 0.0)  # , 1.0)
 
     def project_on_P(p):
         return jnp.clip(p, -lam, lam)
