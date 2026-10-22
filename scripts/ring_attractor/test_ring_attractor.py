@@ -28,8 +28,12 @@ from decomposed_dynamics.dynamics_models import (
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit
-from decomposed_dynamics.inference import BPDNDFHyperparams
-from decomposed_dynamics.inference.bpdn import BPDNDFNoObsInference
+from decomposed_dynamics.inference import (
+    BPDNDFHyperparams,
+    InferenceHyperparams,
+    NoObsInferenceBackend,
+)
+from decomposed_dynamics.inference.bpdn import BPDNDFJointNoObsInference
 from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -151,7 +155,7 @@ def build_model(args, key) -> HierarchicalDecomposedDynamics:
         state_dim=2,
         primitive_type=primitive_type,
         key=key,
-        layer_width=10,
+        layer_width=20,
         num_hidden_layers=4,
         **delta_kwargs,
     )
@@ -161,6 +165,9 @@ def fit_infer_hierarchical_model_all_stages(
     model: HierarchicalDecomposedDynamics,
     trajectory_dict,
     trajectories,
+    inference_backend: NoObsInferenceBackend,
+    start_hyperparams: InferenceHyperparams,
+    end_hyperparams: InferenceHyperparams,
     cache_suffix: str = "",
 ):
     model_path = f"results/ring_attractor/dlds_model{cache_suffix}.eqx"
@@ -169,7 +176,7 @@ def fit_infer_hierarchical_model_all_stages(
 
     if model_fit is None:
         inference_hyperparams = BPDNDFHyperparams(
-            prox_hyperparams=0.7, smooth_coeff=0.1
+            prox_hyperparams=0.3, smooth_coeff=0.1
         )
         _, model_fit = fit(
             trajectory_dict,
@@ -178,16 +185,16 @@ def fit_infer_hierarchical_model_all_stages(
             num_snippets=50,
             max_iter=200,
             lr_init=1,
+            inference_backend=BPDNDFJointNoObsInference(),
             inference_hyperparams=inference_hyperparams,
             model_update_hyperparams=model.initialize_hyperparams(
                 decorr_coeff=0.01, l1_coeff=0.01
             ).primitive_hyperparams,
         )
         inference_hyperparams = BPDNDFHyperparams(
-            prox_hyperparams=0.7, smooth_coeff=0.1
+            prox_hyperparams=0.3, smooth_coeff=0.1
         )
-        inference_backend = BPDNDFNoObsInference()
-        dlds_coeffs = inference_backend.infer_batch(
+        dlds_coeffs = BPDNDFJointNoObsInference().infer_batch(
             model_fit,
             trajectories[:, :-1, :],
             trajectories[:, 1:, :],
@@ -205,12 +212,6 @@ def fit_infer_hierarchical_model_all_stages(
     coords = trajectories[:, :NUM_TIMEPOINTS, :]
     plt.show()
 
-    inference_backend = BPDNDFNoObsInference(prox=prox_l1_binary)
-    inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=(0.1, 0.1),
-        prox_reweight_coeff=(200, 0),
-        smooth_coeff=0,
-    )
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
     dlds_coeff_dict = {i: dlds_coeffs[i] for i in range(dlds_coeffs.shape[0])}
 
@@ -222,35 +223,24 @@ def fit_infer_hierarchical_model_all_stages(
         num_snippets=10,
         max_iter=2000,
         lr_init=1e-3,
-        lr_end=1e-3,
+        lr_end=1e-4,
         inference_backend=inference_backend,
-        inference_hyperparams=inference_hyperparams,
-        prox_hyperparams_max=(0.4, 0.4),
+        inference_hyperparams=start_hyperparams,
+        prox_hyperparams_max=end_hyperparams.prox_hyperparams,
     )
 
-    inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=(0, 0.4),
-        prox_reweight_coeff=(200, 0),
-        smooth_coeff=0.4,
-    )
     coords = trajectories[:, :NUM_TIMEPOINTS, :]
     mlp_coeffs = inference_backend.infer_batch(
         model.coefficient_model(),
         coords,
         dlds_coeffs,
-        inference_hyperparams,
-    )
-
-    inference_hyperparams = BPDNDFHyperparams(
-        prox_hyperparams=(0, 0.4),
-        prox_reweight_coeff=(0, 0),
-        smooth_coeff=0.4,
+        end_hyperparams,
     )
     reinferred_mlp_coeffs = inference_backend.infer_batch(
         model,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
-        inference_hyperparams,
+        end_hyperparams,
     )
 
     return model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs
@@ -413,6 +403,17 @@ def main(**kwargs):
             model,
             trajectory_dict,
             trajectories,
+            inference_backend=BPDNDFJointNoObsInference(prox=prox_l1_binary),
+            start_hyperparams=BPDNDFHyperparams(
+                prox_hyperparams=(0.0, 0.5),
+                prox_reweight_coeff=(200, 0),
+                smooth_coeff=0.4,
+            ),
+            end_hyperparams=BPDNDFHyperparams(
+                prox_hyperparams=(0.1, 0.5),
+                prox_reweight_coeff=(200, 0),
+                smooth_coeff=0.4,
+            ),
             cache_suffix="" if args.delta else "_nondelta",
         )
     )
