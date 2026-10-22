@@ -41,6 +41,11 @@ class DecomposedLinearDynamics(DecomposedDynamicsModel):
 
     @eqx.filter_jit
     def compute_operator_flows(self, x: Array) -> Array:
+        """
+        Computes out[..., k, i] = Σ_j F[k, i, j] * x[..., j],
+        equivalent to applying each matrix F[k] to x: 
+        out[..., k, :] = F[k] @ x[..., :]
+        """
         return jnp.einsum("kij, ...j -> ...ki", self.F, x)
 
     @eqx.filter_jit

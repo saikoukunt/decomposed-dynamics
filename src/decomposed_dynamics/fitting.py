@@ -1,6 +1,8 @@
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.debug as jdbg
+from jaxopt.prox import prox_group_lasso
 from jax import Array, vmap
 from optax import l2_loss
 from tqdm import trange
@@ -105,15 +107,15 @@ def fit_no_obs(
         inference_hyperparams = NoObsInferenceHyperparams(**inference_hyperparams)
 
     lr = lr_init
-    progress_bar = trange(max_iter)
+    progress_bar = trange(max_iter, desc="Iter")
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i, sampling_weights=sampling_weights)
+        # jdbg.print(f"Extracted latents with shape {latents.shape}")
 
         operator_coeffs = bpdn_inference_no_obs(
             dynamics_model, latents, inference_hyperparams
         )
-
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
             dynamics_model, latents, operator_coeffs
         )
@@ -132,7 +134,6 @@ def fit_no_obs(
         lr *= lr_decay
 
     return dynamics_model
-
 
 @eqx.filter_jit
 def update_observation_model(

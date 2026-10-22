@@ -9,6 +9,11 @@ class NoObsInferenceHyperparams:
     smooth_coeff: float = 0.4
     max_iter: int = 1000
     tol: float = 1e-4
+    solver: str = "yall1"
+    spgl1_sigma: float = None
+    spgl1_max_iter: int = 200
+    yall1_rho: int = 1e-2
+
 
 
 @dataclass(frozen=True)

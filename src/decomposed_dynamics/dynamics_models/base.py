@@ -38,6 +38,8 @@ class DecomposedDynamicsModel(eqx.Module):
 
     @jit
     def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
+        """Computes out[..., i] = Σ_k c[..., k] * flows[..., k, i], 
+        equivalent to cᵀ @ flows for each batch."""
         return jnp.einsum("...k, ...ki -> ...i", c, flows)
 
 

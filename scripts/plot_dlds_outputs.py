@@ -61,3 +61,4 @@ def plot_nonzero_slices(
 
     plt.tight_layout()
     plt.savefig(f"{output_dir}/{title.strip()}.png")
+    plt.close()
