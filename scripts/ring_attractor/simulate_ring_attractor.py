@@ -1,9 +1,6 @@
-import glob
-import hashlib
-import json
 import os
-from dataclasses import asdict, dataclass, fields
-from datetime import datetime
+import sys
+from dataclasses import dataclass, fields
 from types import SimpleNamespace
 
 import click
@@ -20,12 +17,15 @@ from simulations.plot_utils import (
 )
 from simulations.ring_attractor import RingAttractorSimulation
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from saved_params import SavedParams
+
 CONTEXT_SETTINGS = {"show_default": True, "help_option_names": ["-h", "--help"]}
 SIMULATION_ROOT = "results/ring_attractor/simulations"
 
 
 @dataclass(frozen=True)
-class RingAttractorParams:
+class RingAttractorParams(SavedParams):
     num_trajectories: int = 2000
     dt: float = 0.05
     tau: float = 0.2
@@ -45,24 +45,14 @@ class RingAttractorParams:
         return cls(**kwargs, seed=seed)
 
     @property
-    def params_hash(self) -> str:
-        return hashlib.sha1(
-            json.dumps(asdict(self), sort_keys=True).encode()
-        ).hexdigest()[:7]
-
-    @property
     def sim_dir(self) -> str | None:
-        matches = glob.glob(f"{SIMULATION_ROOT}/*_{self.params_hash}")
-        return matches[0] if matches else None
+        return self.find_dir(SIMULATION_ROOT)
 
     def save(self, trajectories: Array):
-        sim_dir = (
-            f"{SIMULATION_ROOT}/{datetime.now():%Y%m%d_T%H-%M-%S}_{self.params_hash}"
+        self.make_dir(
+            SIMULATION_ROOT,
+            lambda path: jnp.save(f"{path}/trajectories.npy", trajectories),
         )
-        os.makedirs(sim_dir)
-        with open(f"{sim_dir}/params.json", "w") as f:
-            json.dump(asdict(self), f, indent=2)
-        jnp.save(f"{sim_dir}/trajectories.npy", trajectories)
 
 
 def simulate_ring_attractor(

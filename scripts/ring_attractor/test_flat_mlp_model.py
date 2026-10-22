@@ -1,5 +1,6 @@
 import os
 import sys
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import click
@@ -17,7 +18,6 @@ from decomposed_dynamics.fitting import fit
 from decomposed_dynamics.inference import (
     BPDNDFHyperparams,
     BPDNDFNoObsInference,
-    InferenceHyperparams,
     NoObsInferenceBackend,
 )
 from decomposed_dynamics.inference.bpdn import BPDNDFBatchNoObsInference
@@ -33,39 +33,84 @@ from test_ring_attractor import (
     plot_coeff_spatial_maps,
     plot_example_trajectories_with_coeffs,
     plot_MLP_flow_field,
+    simulation_params,
+)
+from saved_params import SavedParams, load_or_fit
+from simulate_ring_attractor import (
+    load_or_simulate_ring_attractor,
     plot_ring_attractor_flow_and_trajectories,
-    simulate_ring_attractor,
 )
 
 
-def fit_infer_flat_mlp_model(
-    model: MLPDecomposedDynamics,
-    trajectories,
-    inference_backend: NoObsInferenceBackend,
-    start_hyperparams: InferenceHyperparams,
-    end_hyperparams: InferenceHyperparams,
-):
+@dataclass(frozen=True)
+class FlatMLPFitParams(SavedParams):
+    seed: int
+    num_operators: int = 6
+    layer_width: int = 20
+    num_hidden_layers: int = 4
+    samples_per_snippet: int = 20
+    num_snippets: int = 50
+    max_iter: int = 1000
+    lr_init: float = 1.0
+    lr_end: float = 1e-4
+    decorr_coeff: float = 0.0
+    inference_backend: NoObsInferenceBackend = BPDNDFBatchNoObsInference()
+    start_hyperparams: BPDNDFHyperparams = field(
+        default_factory=lambda: BPDNDFHyperparams(
+            prox_hyperparams=(0.0, 0.0, 0.4),
+            prox_reweight_coeff=(200, 200, 0),
+            smooth_coeff=0.4,
+        )
+    )
+    end_hyperparams: BPDNDFHyperparams = field(
+        default_factory=lambda: BPDNDFHyperparams(
+            prox_hyperparams=(0.1, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], 0.5),
+            prox_reweight_coeff=(200, 5, 0),
+            smooth_coeff=0.4,
+        )
+    )
+    # inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(
+    #     prox=prox_l1_binary
+    # )
+    # start_hyperparams: BPDNDFHyperparams = field(
+    #     default_factory=lambda: BPDNDFHyperparams(
+    #         prox_hyperparams=(0.0, 0.4),
+    #         prox_reweight_coeff=(200, 0.0),
+    #         smooth_coeff=0.4,
+    #     )
+    # )
+    # end_hyperparams: BPDNDFHyperparams = field(
+    #     default_factory=lambda: BPDNDFHyperparams(
+    #         prox_hyperparams=([0.1, 0.5, 0.5, 0.5, 0.5, 0.5], 0.4),
+    #         prox_reweight_coeff=(200, 0.0),
+    #         smooth_coeff=0.4,
+    #     )
+    # )
+
+
+def fit_flat_mlp(model: MLPDecomposedDynamics, trajectories, params: FlatMLPFitParams):
     trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
     _, model = fit(
         trajectory_dict,
         model,
-        samples_per_snippet=20,
-        num_snippets=50,
-        max_iter=1000,
-        lr_init=1,
-        lr_end=1e-4,
-        inference_backend=inference_backend,
-        inference_hyperparams=start_hyperparams,
+        samples_per_snippet=params.samples_per_snippet,
+        num_snippets=params.num_snippets,
+        max_iter=params.max_iter,
+        lr_init=params.lr_init,
+        lr_end=params.lr_end,
+        inference_backend=params.inference_backend,
+        inference_hyperparams=params.start_hyperparams,
         model_update_hyperparams=model.initialize_hyperparams(
-            normalization_grid=visited_grid(trajectories), decorr_coeff=0.0
+            normalization_grid=visited_grid(trajectories),
+            decorr_coeff=params.decorr_coeff,
         ),
-        prox_hyperparams_end=end_hyperparams.prox_hyperparams,
+        prox_hyperparams_end=params.end_hyperparams.prox_hyperparams,
     )
-    mlp_coeffs = inference_backend.infer_batch(
+    mlp_coeffs = params.inference_backend.infer_batch(
         model,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
-        end_hyperparams,
+        params.end_hyperparams,
     )
 
     return model, mlp_coeffs
@@ -79,40 +124,23 @@ def main(**kwargs):
     args = SimpleNamespace(**kwargs)
 
     keys = jr.split(jr.key(args.seed), 6)
-    simulation, trajectories = simulate_ring_attractor(args, keys)
+    sim_params = simulation_params(args)
+    simulation, trajectories = load_or_simulate_ring_attractor(sim_params)
 
+    params = FlatMLPFitParams(seed=args.seed)
     model = MLPDecomposedDynamics(
-        num_operators=6,
+        num_operators=params.num_operators,
         state_dim=2,
         key=keys[3],
-        layer_width=20,
-        num_hidden_layers=4,
+        layer_width=params.layer_width,
+        num_hidden_layers=params.num_hidden_layers,
     )
-    model, mlp_coeffs = fit_infer_flat_mlp_model(
+    _, model, mlp_coeffs = load_or_fit(
+        params,
+        f"{sim_params.sim_dir}/{type(model).__name__}",
         model,
-        trajectories,
-        inference_backend=BPDNDFBatchNoObsInference(),
-        start_hyperparams=BPDNDFHyperparams(
-            prox_hyperparams=(0.0, 0.0, 0.4),
-            prox_reweight_coeff=(200, 200, 0),
-            smooth_coeff=0.4,
-        ),
-        end_hyperparams=BPDNDFHyperparams(
-            prox_hyperparams=(0.1, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], 0.5),
-            prox_reweight_coeff=(200, 5, 0),
-            smooth_coeff=0.4,
-        ),
-        # inference_backend=BPDNDFNoObsInference(prox=prox_l1_binary),
-        # start_hyperparams=BPDNDFHyperparams(
-        #     prox_hyperparams=(0.0, 0.4),
-        #     prox_reweight_coeff=(200, 0.0),
-        #     smooth_coeff=0.4,
-        # ),
-        # end_hyperparams=BPDNDFHyperparams(
-        #     prox_hyperparams=([0.1, 0.5, 0.5, 0.5, 0.5, 0.5], 0.4),
-        #     prox_reweight_coeff=(200, 0.0),
-        #     smooth_coeff=0.4,
-        # ),
+        lambda: fit_flat_mlp(model, trajectories, params),
+        "coeffs",
     )
     plotted_grid, plotted_simulation_flows = plot_ring_attractor_flow_and_trajectories(
         args, simulation, trajectories

@@ -26,12 +26,13 @@ from decomposed_dynamics.inference.bpdn import (
 from decomposed_dynamics.utils import make_filter_spec
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test_ring_attractor import (
+from simulate_ring_attractor import (
     CONTEXT_SETTINGS,
+    load_or_simulate_ring_attractor,
     plot_ring_attractor_flow_and_trajectories,
     ring_attractor_options,
-    simulate_ring_attractor,
 )
+from test_ring_attractor import seed_options, simulation_params
 
 NUM_PLOTTED_TRAJECTORIES = 10
 LEARNING_RATE = 1.0
@@ -107,11 +108,12 @@ def plot_trajectories_with_coeffs(coeffs, trajectories, grid, flows, title):
 
 @click.command(context_settings=CONTEXT_SETTINGS)
 @ring_attractor_options
+@seed_options
 def main(**kwargs):
     args = SimpleNamespace(**kwargs)
 
     keys = jr.split(jr.key(args.seed), 7)
-    simulation, trajectories = simulate_ring_attractor(args, keys)
+    simulation, trajectories = load_or_simulate_ring_attractor(simulation_params(args))
 
     plotted_grid, plotted_simulation_flows = plot_ring_attractor_flow_and_trajectories(
         args, simulation, trajectories

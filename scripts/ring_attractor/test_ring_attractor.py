@@ -1,5 +1,6 @@
 import os
 import sys
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import click
@@ -9,37 +10,102 @@ import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
 import numpy as np
-from jax import Array
 from simulations.plot_utils import (
-    compute_flow_field,
-    plot_flow_field,
     plot_speed,
     plot_trajectories,
 )
-from simulations.ring_attractor import RingAttractorSimulation
 
 from decomposed_dynamics.dynamics_models import (
-    DecomposedLinearDeltaDynamics,
     DecomposedLinearDynamics,
-    HierarchicalDecomposedDeltaDynamics,
     HierarchicalDecomposedDynamics,
     linear_combination,
 )
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit
-from decomposed_dynamics.inference import (
-    BPDNDFHyperparams,
-    InferenceHyperparams,
-    NoObsInferenceBackend,
-)
+from decomposed_dynamics.inference import BPDNDFHyperparams, NoObsInferenceBackend
 from decomposed_dynamics.inference.bpdn import BPDNDFJointNoObsInference
 from decomposed_dynamics.proximal_operators import prox_l1_binary
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plot_utils import plot_Fs
+from saved_params import SavedParams, load_or_fit
+from simulate_ring_attractor import (
+    CONTEXT_SETTINGS,
+    RingAttractorParams,
+    load_or_simulate_ring_attractor,
+    plot_ring_attractor_flow_and_trajectories,
+    ring_attractor_options,
+)
 
 NUM_TIMEPOINTS = 20
+SAMPLES_PER_SNIPPET = 20
+
+
+@dataclass(frozen=True)
+class DLDSFitParams(SavedParams):
+    seed: int
+    num_primitives: int = 6
+    samples_per_snippet: int = SAMPLES_PER_SNIPPET
+    num_snippets: int = 50
+    max_iter: int = 200
+    lr_init: float = 1.0
+    decorr_coeff: float = 0.01
+    l1_coeff: float = 0.01
+    inference_backend: NoObsInferenceBackend = BPDNDFJointNoObsInference()
+    inference_hyperparams: BPDNDFHyperparams = field(
+        default_factory=lambda: BPDNDFHyperparams(
+            prox_hyperparams=0.3, smooth_coeff=0.1
+        )
+    )
+
+
+@dataclass(frozen=True)
+class HierarchicalFitParams(SavedParams):
+    seed: int
+    num_nonlinear_operators: int = 6
+    layer_width: int = 20
+    num_hidden_layers: int = 4
+    samples_per_snippet: int = SAMPLES_PER_SNIPPET
+    num_snippets: int = 10
+    max_iter: int = 2000
+    lr_init: float = 1e-3
+    lr_end: float = 1e-4
+    inference_backend: NoObsInferenceBackend = BPDNDFJointNoObsInference(
+        prox=prox_l1_binary
+    )
+    start_hyperparams: BPDNDFHyperparams = field(
+        default_factory=lambda: BPDNDFHyperparams(
+            prox_hyperparams=(0.0, 0.5),
+            prox_reweight_coeff=(200, 0),
+            smooth_coeff=0.4,
+        )
+    )
+    end_hyperparams: BPDNDFHyperparams = field(
+        default_factory=lambda: BPDNDFHyperparams(
+            prox_hyperparams=(0.1, 0.5),
+            prox_reweight_coeff=(200, 0),
+            smooth_coeff=0.4,
+        )
+    )
+
+
+def seed_options(f):
+    f = click.option(
+        "--sim_seed",
+        type=int,
+        default=None,
+        help="simulation random seed, defaults to --seed",
+    )(f)
+    return click.option(
+        "--seed", default=RingAttractorParams.seed, help="model random seed"
+    )(f)
+
+
+def simulation_params(args) -> RingAttractorParams:
+    return RingAttractorParams.from_args(
+        args, args.seed if args.sim_seed is None else args.sim_seed
+    )
 
 
 def plot_MLP_flow_field(
@@ -78,140 +144,57 @@ def plot_MLP_flow_field(
     return fig
 
 
-def plot_ring_attractor_flow_and_trajectories(
-    args, simulation: RingAttractorSimulation, trajectories: Array
-):
-    fig, ax = plt.subplots(figsize=(12, 6), nrows=1, ncols=2)
-    grid, _ = plot_flow_field(
-        ax[0], simulation, -args.max_radius, args.max_radius, 0.05
-    )
-    ax[0].set_title("Ring attractor flow field")
-
-    grid, flows, _ = compute_flow_field(
-        simulation, -args.max_radius, args.max_radius, 1 / 100
-    )
-    plot_speed(ax[0], grid, flows, vmin=0, vmax=0.25, alpha=0.5)
-    plot_speed(ax[1], grid, flows, vmin=0, vmax=0.25, alpha=0.5)
-
-    plot_trajectories(ax[1], trajectories[:300])
-    ax[1].set_title("Many trajectories")
-
-    return grid, flows
-
-
-def simulate_ring_attractor(args, keys):
-    simulation = RingAttractorSimulation(dt=args.dt, tau=args.tau)
-
-    x_0 = jr.uniform(
-        keys[0],
-        shape=(args.num_trajectories, 2),
-        minval=-1,
-        maxval=1,
-    )
-    radius = jr.uniform(
-        keys[1],
-        shape=(args.num_trajectories, 1),
-        minval=args.min_radius,
-        maxval=args.max_radius,
-    )
-    x_0 = radius * x_0 / jnp.linalg.norm(x_0, axis=1, keepdims=True)
-
-    trajectories = simulation.sample_trajectories(
-        x_0,
-        args.num_trajectories,
-        sigma=args.sigma,
-        T=args.T,
-        dt=args.dt,
-        seed=args.seed,
-    )
-
-    return simulation, trajectories
-
-
-def load_dlds_coeffs(dlds_model, model_path, coeffs_path):
-    if os.path.exists(model_path) and os.path.exists(coeffs_path):
-        model_fit = eqx.tree_deserialise_leaves(model_path, dlds_model)
-        dlds_coeffs = jnp.load(coeffs_path)
-
-        return model_fit, dlds_coeffs
-    else:
-        return None, None
-
-
-def build_model(args, key) -> HierarchicalDecomposedDynamics:
-    model_type, primitive_type, delta_kwargs = (
-        (
-            HierarchicalDecomposedDeltaDynamics,
-            DecomposedLinearDeltaDynamics,
-            {"dt": args.dt},
-        )
-        if args.delta
-        else (HierarchicalDecomposedDynamics, DecomposedLinearDynamics, {})
-    )
-
+def build_model(
+    model_type: type[HierarchicalDecomposedDynamics],
+    primitive_type: type[DecomposedDynamicsModel],
+    dlds_params: DLDSFitParams,
+    hierarchical_params: HierarchicalFitParams,
+    key,
+    **model_kwargs,
+) -> HierarchicalDecomposedDynamics:
     return model_type(
-        num_nonlinear_operators=6,
-        num_primitives=6,
+        num_nonlinear_operators=hierarchical_params.num_nonlinear_operators,
+        num_primitives=dlds_params.num_primitives,
         state_dim=2,
         primitive_type=primitive_type,
         key=key,
-        layer_width=20,
-        num_hidden_layers=4,
-        **delta_kwargs,
+        layer_width=hierarchical_params.layer_width,
+        num_hidden_layers=hierarchical_params.num_hidden_layers,
+        **model_kwargs,
     )
 
 
-def fit_infer_hierarchical_model_all_stages(
+def fit_dlds(primitives, trajectories, params: DLDSFitParams):
+    trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
+    _, primitives = fit(
+        trajectory_dict,
+        primitives,
+        samples_per_snippet=params.samples_per_snippet,
+        num_snippets=params.num_snippets,
+        max_iter=params.max_iter,
+        lr_init=params.lr_init,
+        inference_backend=params.inference_backend,
+        inference_hyperparams=params.inference_hyperparams,
+        model_update_hyperparams=primitives.initialize_hyperparams(
+            decorr_coeff=params.decorr_coeff, l1_coeff=params.l1_coeff
+        ),
+    )
+    dlds_coeffs = params.inference_backend.infer_batch(
+        primitives,
+        trajectories[:, :-1, :],
+        trajectories[:, 1:, :],
+        params.inference_hyperparams,
+    )
+
+    return primitives, dlds_coeffs
+
+
+def fit_hierarchical(
     model: HierarchicalDecomposedDynamics,
-    trajectory_dict,
     trajectories,
-    inference_backend: NoObsInferenceBackend,
-    start_hyperparams: InferenceHyperparams,
-    end_hyperparams: InferenceHyperparams,
-    cache_suffix: str = "",
+    dlds_coeffs,
+    params: HierarchicalFitParams,
 ):
-    model_path = f"results/ring_attractor/dlds_model{cache_suffix}.eqx"
-    coeffs_path = f"results/ring_attractor/dlds_coeffs{cache_suffix}.npy"
-    model_fit, dlds_coeffs = load_dlds_coeffs(model.primitives, model_path, coeffs_path)
-
-    if model_fit is None:
-        inference_hyperparams = BPDNDFHyperparams(
-            prox_hyperparams=0.3, smooth_coeff=0.1
-        )
-        _, model_fit = fit(
-            trajectory_dict,
-            model.primitives,
-            samples_per_snippet=20,
-            num_snippets=50,
-            max_iter=200,
-            lr_init=1,
-            inference_backend=BPDNDFJointNoObsInference(),
-            inference_hyperparams=inference_hyperparams,
-            model_update_hyperparams=model.initialize_hyperparams(
-                decorr_coeff=0.01, l1_coeff=0.01
-            ).primitive_hyperparams,
-        )
-        inference_hyperparams = BPDNDFHyperparams(
-            prox_hyperparams=0.3, smooth_coeff=0.1
-        )
-        dlds_coeffs = BPDNDFJointNoObsInference().infer_batch(
-            model_fit,
-            trajectories[:, :-1, :],
-            trajectories[:, 1:, :],
-            inference_hyperparams,
-        )
-
-        eqx.tree_serialise_leaves(model_path, model_fit)
-        jnp.save(coeffs_path, dlds_coeffs)
-
-    # fit hierarchical to coefficients
-    model = eqx.tree_at(lambda model: model.primitives, model, model_fit)
-    plot_Fs(model.primitives.F)
-    fig = plot_coeff_spatial_maps(dlds_coeffs, trajectories, "c")
-    fig.suptitle("dLDS inferred coefficients")
-    coords = trajectories[:, :NUM_TIMEPOINTS, :]
-    plt.show()
-
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
     dlds_coeff_dict = {i: dlds_coeffs[i] for i in range(dlds_coeffs.shape[0])}
 
@@ -219,31 +202,31 @@ def fit_infer_hierarchical_model_all_stages(
         trajectory_dict,
         dlds_coeff_dict,
         model,
-        samples_per_snippet=20,
-        num_snippets=10,
-        max_iter=2000,
-        lr_init=1e-3,
-        lr_end=1e-4,
-        inference_backend=inference_backend,
-        inference_hyperparams=start_hyperparams,
-        prox_hyperparams_max=end_hyperparams.prox_hyperparams,
+        samples_per_snippet=params.samples_per_snippet,
+        num_snippets=params.num_snippets,
+        max_iter=params.max_iter,
+        lr_init=params.lr_init,
+        lr_end=params.lr_end,
+        inference_backend=params.inference_backend,
+        inference_hyperparams=params.start_hyperparams,
+        prox_hyperparams_max=params.end_hyperparams.prox_hyperparams,
     )
 
     coords = trajectories[:, :NUM_TIMEPOINTS, :]
-    mlp_coeffs = inference_backend.infer_batch(
+    mlp_coeffs = params.inference_backend.infer_batch(
         model.coefficient_model(),
         coords,
         dlds_coeffs,
-        end_hyperparams,
+        params.end_hyperparams,
     )
-    reinferred_mlp_coeffs = inference_backend.infer_batch(
+    reinferred_mlp_coeffs = params.inference_backend.infer_batch(
         model,
         trajectories[:, :-1, :],
         trajectories[:, 1:, :],
-        end_hyperparams,
+        params.end_hyperparams,
     )
 
-    return model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs
+    return model, mlp_coeffs, reinferred_mlp_coeffs
 
 
 def plot_hierarchical_model_fit(
@@ -367,55 +350,50 @@ def plot_coeff_spatial_maps(coeffs, trajectories, symbol):
     return fig
 
 
-@click.command(
-    context_settings={"show_default": True, "help_option_names": ["-h", "--help"]}
-)
-@click.option(
-    "-n", "--num_trajectories", default=2000, help="number of trajectories to sample"
-)
-@click.option("--dt", default=0.05, help="time step in seconds for Euler approximation")
-@click.option("--tau", default=0.2, help="timescale in seconds of the flow field")
-@click.option("--sigma", default=0.0, help="white noise variance")
-@click.option(
-    "--T", "T", default=5.0, help="duration of sampled trajectories in seconds"
-)
-@click.option("--seed", default=0, help="random seed")
-@click.option("--min_radius", default=0.0, help="minimum radius of initial conditions")
-@click.option("--max_radius", default=2.0, help="maximum radius of initial conditions")
-@click.option(
-    "--delta/--no-delta",
-    default=True,
-    help="use delta (velocity) dynamics models instead of next-state models",
-)
-def main(**kwargs):
-    args = SimpleNamespace(**kwargs)
-
+def run(
+    args,
+    model_type: type[HierarchicalDecomposedDynamics],
+    primitive_type: type[DecomposedDynamicsModel],
+    **model_kwargs,
+):
+    sim_params = simulation_params(args)
+    simulation, trajectories = load_or_simulate_ring_attractor(sim_params)
     keys = jr.split(jr.key(args.seed), 6)
-    simulation, trajectories = simulate_ring_attractor(args, keys)
     plotted_grid, plotted_simulation_flows = plot_ring_attractor_flow_and_trajectories(
         args, simulation, trajectories
     )
 
-    trajectory_dict = {i: trajectories[i] for i in range(trajectories.shape[0])}
-    model = build_model(args, keys[3])
-    model, dlds_coeffs, mlp_coeffs, reinferred_mlp_coeffs = (
-        fit_infer_hierarchical_model_all_stages(
-            model,
-            trajectory_dict,
-            trajectories,
-            inference_backend=BPDNDFJointNoObsInference(prox=prox_l1_binary),
-            start_hyperparams=BPDNDFHyperparams(
-                prox_hyperparams=(0.0, 0.5),
-                prox_reweight_coeff=(200, 0),
-                smooth_coeff=0.4,
-            ),
-            end_hyperparams=BPDNDFHyperparams(
-                prox_hyperparams=(0.1, 0.5),
-                prox_reweight_coeff=(200, 0),
-                smooth_coeff=0.4,
-            ),
-            cache_suffix="" if args.delta else "_nondelta",
-        )
+    dlds_params = DLDSFitParams(seed=args.seed)
+    hierarchical_params = HierarchicalFitParams(seed=args.seed)
+    model = build_model(
+        model_type,
+        primitive_type,
+        dlds_params,
+        hierarchical_params,
+        keys[3],
+        **model_kwargs,
+    )
+
+    dlds_dir, primitives, dlds_coeffs = load_or_fit(
+        dlds_params,
+        f"{sim_params.sim_dir}/{primitive_type.__name__}",
+        model.primitives,
+        lambda: fit_dlds(model.primitives, trajectories, dlds_params),
+        "coeffs",
+    )
+    model = eqx.tree_at(lambda model: model.primitives, model, primitives)
+    plot_Fs(model.primitives.F)
+    fig = plot_coeff_spatial_maps(dlds_coeffs, trajectories, "c")
+    fig.suptitle("dLDS inferred coefficients")
+    plt.show()
+
+    _, model, mlp_coeffs, reinferred_mlp_coeffs = load_or_fit(
+        hierarchical_params,
+        f"{dlds_dir}/{model_type.__name__}",
+        model,
+        lambda: fit_hierarchical(model, trajectories, dlds_coeffs, hierarchical_params),
+        "mlp_coeffs",
+        "reinferred_mlp_coeffs",
     )
     plot_hierarchical_model_fit(
         model,
@@ -429,6 +407,17 @@ def main(**kwargs):
         args,
     )
     plt.show()
+
+
+@click.command(context_settings=CONTEXT_SETTINGS)
+@ring_attractor_options
+@seed_options
+def main(**kwargs):
+    run(
+        SimpleNamespace(**kwargs),
+        HierarchicalDecomposedDynamics,
+        DecomposedLinearDynamics,
+    )
 
 
 if __name__ == "__main__":
