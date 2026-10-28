@@ -8,7 +8,8 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
-from jax import Array
+import numpy as np
+from numpy.typing import NDArray
 from simulations.plot_utils import (
     compute_flow_field,
     plot_flow_field,
@@ -48,16 +49,16 @@ class RingAttractorParams(SavedParams):
     def sim_dir(self) -> str | None:
         return self.find_dir(SIMULATION_ROOT)
 
-    def save(self, trajectories: Array):
+    def save(self, trajectories: NDArray):
         self.make_dir(
             SIMULATION_ROOT,
-            lambda path: jnp.save(f"{path}/trajectories.npy", trajectories),
+            lambda path: np.save(f"{path}/trajectories.npy", trajectories),
         )
 
 
 def simulate_ring_attractor(
     params: RingAttractorParams,
-) -> tuple[RingAttractorSimulation, Array]:
+) -> tuple[RingAttractorSimulation, NDArray]:
     simulation = RingAttractorSimulation(dt=params.dt, tau=params.tau)
     keys = jr.split(jr.key(params.seed), 2)
 
@@ -79,15 +80,15 @@ def simulate_ring_attractor(
         seed=params.seed,
     )
 
-    return simulation, trajectories
+    return simulation, np.asarray(trajectories)
 
 
 def load_or_simulate_ring_attractor(
     params: RingAttractorParams,
-) -> tuple[RingAttractorSimulation, Array]:
+) -> tuple[RingAttractorSimulation, NDArray]:
     if params.sim_dir is not None:
         simulation = RingAttractorSimulation(dt=params.dt, tau=params.tau)
-        return simulation, jnp.load(f"{params.sim_dir}/trajectories.npy")
+        return simulation, np.load(f"{params.sim_dir}/trajectories.npy")
 
     simulation, trajectories = simulate_ring_attractor(params)
     params.save(trajectories)
@@ -96,7 +97,7 @@ def load_or_simulate_ring_attractor(
 
 
 def plot_ring_attractor_flow_and_trajectories(
-    args, simulation: RingAttractorSimulation, trajectories: Array
+    args, simulation: RingAttractorSimulation, trajectories: NDArray
 ):
     fig, ax = plt.subplots(figsize=(12, 6), nrows=1, ncols=2)
     grid, _ = plot_flow_field(
