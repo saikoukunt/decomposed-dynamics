@@ -8,18 +8,18 @@ from jax import Array
 
 
 def extract_snippets(
-    trial_data: dict, num_snippets: int, samples_per_snippet: int, seed: int
+    trial_data: dict, num_snippets: int, timepoints_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     keys = list(trial_data.keys())
 
     num_trials = len(trial_data)
-    num_observations = trial_data[keys[0]].shape[1]
-    trial_length = min(trial_data[key].shape[0] for key in trial_data)
+    observation_dim = trial_data[keys[0]].shape[1]
+    min_trial_length = min(trial_data[key].shape[0] for key in trial_data)
 
     rng = np.random.default_rng(seed)
 
-    snippet_length = min(samples_per_snippet, trial_length)
-    snippets = np.zeros((num_snippets, snippet_length, num_observations))
+    snippet_length = min(timepoints_per_snippet, min_trial_length)
+    snippets = np.zeros((num_snippets, snippet_length, observation_dim))
     snippet_times = np.zeros((num_snippets, 2), dtype=np.int32)
 
     if num_snippets == num_trials:
@@ -28,7 +28,7 @@ def extract_snippets(
         trial_inds = rng.choice(num_trials, num_snippets)
 
     for i, trial_ind in enumerate(trial_inds):
-        t_start = rng.choice(trial_length - snippet_length + 1)
+        t_start = rng.choice(min_trial_length - snippet_length + 1)
         t_end = t_start + snippet_length
         snippets[i] = trial_data[keys[trial_ind]][t_start:t_end, :]
         snippet_times[i] = [t_start, t_end]
@@ -96,7 +96,3 @@ def keep_frozen(updated_model, model, filter_spec):
         eqx.filter(updated_model, filter_spec),
         eqx.filter(model, filter_spec, inverse=True),
     )
-
-
-def interpolate(start, end, frac: float):
-    return jax.tree.map(lambda a, b: a + frac * (b - a), start, end)
