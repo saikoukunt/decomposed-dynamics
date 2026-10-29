@@ -103,7 +103,7 @@ class MLPDecomposedDynamics(DecomposedDynamicsModel):
     ) -> Self:
         updated_model = self.decorrelate_operators(latents, hyperparams.decorr_coeff)
 
-        return updated_model.normalize_operators(hyperparams.normalization_grid)
+        return updated_model  # .normalize_operators(hyperparams.normalization_grid)
 
     @eqx.filter_jit
     def normalize_operators(self, grid: Array) -> Self:

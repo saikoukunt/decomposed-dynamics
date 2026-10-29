@@ -25,7 +25,11 @@ from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit
 from decomposed_dynamics.inference import BPDNDFHyperparams, NoObsInferenceBackend
 from decomposed_dynamics.inference.bpdn import BPDNDFJointNoObsInference
-from decomposed_dynamics.proximal_operators import prox_l1_binary
+from decomposed_dynamics.proximal_operators import (
+    L1BinaryProx,
+    NonNegativeL1Prox,
+    Penalty,
+)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plot_utils import plot_Fs
@@ -52,10 +56,10 @@ class DLDSFitParams(SavedParams):
     lr_init: float = 1.0
     decorr_coeff: float = 0.01
     l1_coeff: float = 0.01
-    inference_backend: NoObsInferenceBackend = BPDNDFJointNoObsInference()
+    inference_backend: type[NoObsInferenceBackend] = BPDNDFJointNoObsInference
     inference_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox_hyperparams=0.3, smooth_coeff=0.1
+            prox=NonNegativeL1Prox(Penalty(0.3, reweight=200.0)), smooth_coeff=0.1
         )
     )
 
@@ -71,20 +75,20 @@ class HierarchicalFitParams(SavedParams):
     max_iter: int = 2000
     lr_init: float = 1e-3
     lr_end: float = 1e-4
-    inference_backend: NoObsInferenceBackend = BPDNDFJointNoObsInference(
-        prox=prox_l1_binary
-    )
+    inference_backend: type[NoObsInferenceBackend] = BPDNDFJointNoObsInference
     start_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox_hyperparams=(0.0, 0.5),
-            prox_reweight_coeff=(200, 0),
+            prox=L1BinaryProx(
+                l1=Penalty(0.0, reweight=200), binary=Penalty(0.5)
+            ),
             smooth_coeff=0.4,
         )
     )
     end_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox_hyperparams=(0.1, 0.5),
-            prox_reweight_coeff=(200, 0),
+            prox=L1BinaryProx(
+                l1=Penalty(0.1, reweight=200), binary=Penalty(0.5)
+            ),
             smooth_coeff=0.4,
         )
     )
@@ -209,7 +213,7 @@ def fit_hierarchical(
         lr_end=params.lr_end,
         inference_backend=params.inference_backend,
         inference_hyperparams=params.start_hyperparams,
-        prox_hyperparams_max=params.end_hyperparams.prox_hyperparams,
+        prox_end=params.end_hyperparams.prox,
     )
 
     coords = trajectories[:, :NUM_TIMEPOINTS, :]

@@ -25,7 +25,11 @@ from decomposed_dynamics.inference.fused_lasso import (
     FusedLassoHyperparams,
     FusedLassoNoObsInference,
 )
-from decomposed_dynamics.proximal_operators import prox_l1_binary
+from decomposed_dynamics.proximal_operators import (
+    L1BinaryProx,
+    L1GroupBinaryProx,
+    Penalty,
+)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from test_ring_attractor import main as ring_attractor_main
@@ -54,35 +58,42 @@ class FlatMLPFitParams(SavedParams):
     lr_init: float = 1.0
     lr_end: float = 1e-4
     decorr_coeff: float = 0.0
-    inference_backend: NoObsInferenceBackend = BPDNDFBatchNoObsInference()
+    inference_backend: type[NoObsInferenceBackend] = BPDNDFBatchNoObsInference
     start_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox_hyperparams=(0.0, 0.0, 0.4),
-            prox_reweight_coeff=(200, 200, 0),
+            prox=L1GroupBinaryProx(
+                l1=Penalty(0.0, reweight=200),
+                group=Penalty(0.0, reweight=200),
+                binary=Penalty(0.4),
+            ),
             smooth_coeff=0.4,
         )
     )
     end_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox_hyperparams=(0.1, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], 0.5),
-            prox_reweight_coeff=(200, 5, 0),
+            prox=L1GroupBinaryProx(
+                l1=Penalty(0.1, reweight=200),
+                group=Penalty([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], reweight=5),
+                binary=Penalty(0.5),
+            ),
             smooth_coeff=0.4,
         )
     )
-    # inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(
-    #     prox=prox_l1_binary
-    # )
+    # inference_backend: type[NoObsInferenceBackend] = BPDNDFNoObsInference
     # start_hyperparams: BPDNDFHyperparams = field(
     #     default_factory=lambda: BPDNDFHyperparams(
-    #         prox_hyperparams=(0.0, 0.4),
-    #         prox_reweight_coeff=(200, 0.0),
+    #         prox=L1BinaryProx(
+    #             l1=Penalty(0.0, reweight=200), binary=Penalty(0.4)
+    #         ),
     #         smooth_coeff=0.4,
     #     )
     # )
     # end_hyperparams: BPDNDFHyperparams = field(
     #     default_factory=lambda: BPDNDFHyperparams(
-    #         prox_hyperparams=([0.1, 0.5, 0.5, 0.5, 0.5, 0.5], 0.4),
-    #         prox_reweight_coeff=(200, 0.0),
+    #         prox=L1BinaryProx(
+    #             l1=Penalty([0.1, 0.5, 0.5, 0.5, 0.5, 0.5], reweight=200),
+    #             binary=Penalty(0.4),
+    #         ),
     #         smooth_coeff=0.4,
     #     )
     # )
@@ -104,7 +115,7 @@ def fit_flat_mlp(model: MLPDecomposedDynamics, trajectories, params: FlatMLPFitP
             normalization_grid=visited_grid(trajectories),
             decorr_coeff=params.decorr_coeff,
         ),
-        prox_hyperparams_end=params.end_hyperparams.prox_hyperparams,
+        prox_end=params.end_hyperparams.prox,
     )
     mlp_coeffs = params.inference_backend.infer_batch(
         model,

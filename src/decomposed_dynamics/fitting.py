@@ -17,11 +17,10 @@ from decomposed_dynamics.inference import (
     NoObsInferenceBackend,
 )
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.proximal_operators import as_prox_hyperparams
+from decomposed_dynamics.proximal_operators import ProximalOperator
 from decomposed_dynamics.utils import (
     eqx_module_to_string,
     extract_snippets,
-    interpolate,
     keep_frozen,
     make_filter_spec,
 )
@@ -36,57 +35,50 @@ def fit(
     lr_init: float = 10.0,
     lr_end: None | float = None,
     max_iter: int = 200,
-    inference_backend: InferenceBackend | NoObsInferenceBackend | None = None,
+    inference_backend: type[InferenceBackend | NoObsInferenceBackend] | None = None,
     inference_hyperparams: InferenceHyperparams = None,
-    model_update_hyperparams: dict | OperatorHyperparams = {},
+    model_update_hyperparams: OperatorHyperparams | None = None,
     frozen: Callable | None = None,
-    prox_hyperparams_end: None | float | tuple = None,
+    prox_end: ProximalOperator | None = None,
 ) -> tuple[ObservationModel | None, DecomposedDynamicsModel]:
     """Fit `dynamics_model`, jointly with `observation_model` when one is given.
 
     `frozen(dynamics_model, observation_model)` selects the parts to keep fixed.
     """
 
-    # TODO: wrap parameter initialization into a function
-    if inference_backend is None and inference_hyperparams is None:
-        raise ValueError("pass an inference backend, inference hyperparams, or both")
-    if inference_backend is None:
-        inference_backend = inference_hyperparams.get_backend(observation_model)
-    elif inference_hyperparams is None:
-        inference_hyperparams = inference_backend.initialize_hyperparams()
-
-    if type(model_update_hyperparams) is dict:
-        model_update_hyperparams = dynamics_model.initialize_hyperparams(
-            **model_update_hyperparams
+    inference_backend, inference_hyperparams, model_update_hyperparams = (
+        initialize_fit_hyperparams(
+            dynamics_model,
+            observation_model,
+            inference_backend,
+            inference_hyperparams,
+            model_update_hyperparams,
         )
+    )
 
-    dynamics_filter_spec, obs_filter_spec = make_filter_spec(
+    dynamics_filter_spec, observation_filter_spec = make_filter_spec(
         (dynamics_model, observation_model),
         None if frozen is None else lambda models: frozen(*models),
     )
 
+    # TODO: move hyperparams scheduling to class
     if lr_end is None:
         lr_end = lr_init
     lr = jnp.linspace(lr_init, lr_end, max_iter)
 
-    prox_hyperparams_start = inference_hyperparams.prox_hyperparams
-    prox_hyperparams_end = (
-        prox_hyperparams_start
-        if prox_hyperparams_end is None
-        else as_prox_hyperparams(prox_hyperparams_end)
-    )
+    prox_start = inference_hyperparams.prox
+    prox_end = prox_start if prox_end is None else prox_end
 
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
         snippets, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
 
+        # TODO: handle in scheduling class
         inference_hyperparams = eqx.tree_at(
-            lambda hyperparams: hyperparams.prox_hyperparams,
+            lambda hyperparams: hyperparams.prox,
             inference_hyperparams,
-            interpolate(
-                prox_hyperparams_start, prox_hyperparams_end, min(2 * i / max_iter, 1)
-            ),
+            prox_start.interpolate(prox_end, min(2 * i / max_iter, 1)),
         )
 
         if observation_model is None:
@@ -120,17 +112,18 @@ def fit(
             dynamics_filter_spec,
         )
 
+        # TODO: move loss reporting to custom function
         delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
 
         if observation_model is not None:
             diff_obs_model, static_obs_model = eqx.partition(
-                observation_model, obs_filter_spec
+                observation_model, observation_filter_spec
             )
             data_nll, data_nll_grads = data_nll_value_and_grad(
                 diff_obs_model, static_obs_model, snippets, latents
             )
             observation_model, delta_obs_model = update_observation_model(
-                observation_model, data_nll_grads, lr[i], obs_filter_spec
+                observation_model, data_nll_grads, lr[i], observation_filter_spec
             )
             delta_str = f"Data NLL: {data_nll:.4f}, " + delta_str
             delta_str += eqx_module_to_string(delta_obs_model)
@@ -139,6 +132,27 @@ def fit(
         progress_bar.set_postfix_str(delta_str)
 
     return observation_model, dynamics_model
+
+
+def initialize_fit_hyperparams(
+    dynamics_model: DecomposedDynamicsModel,
+    observation_model: ObservationModel | None = None,
+    inference_backend: type[InferenceBackend | NoObsInferenceBackend] | None = None,
+    inference_hyperparams: InferenceHyperparams = None,
+    model_update_hyperparams: OperatorHyperparams | None = None,
+):
+    if inference_backend is None and inference_hyperparams is None:
+        raise ValueError("pass an inference backend, inference hyperparams, or both")
+
+    if inference_backend is None:
+        inference_backend = inference_hyperparams.get_backend(observation_model)
+    elif inference_hyperparams is None:
+        inference_hyperparams = inference_backend.initialize_hyperparams()
+
+    if model_update_hyperparams is None:
+        model_update_hyperparams = dynamics_model.initialize_hyperparams()
+
+    return inference_backend, inference_hyperparams, model_update_hyperparams
 
 
 @eqx.filter_jit

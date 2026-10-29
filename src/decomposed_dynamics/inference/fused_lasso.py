@@ -1,6 +1,5 @@
 import functools
-from dataclasses import dataclass
-from typing import Callable, override
+from typing import override
 
 import equinox as eqx
 import jax
@@ -17,28 +16,26 @@ from decomposed_dynamics.inference.base import (
 from decomposed_dynamics.loss_functions import normalized_dynamics_reconstruction_loss
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.proximal_operators import (
-    as_prox_hyperparams,
-    reweight_prox_hyperparams,
-    prox_l1_unit_tv,
+    L1UnitTVProx,
+    Penalty,
+    ProximalOperator,
+    apply_prox,
 )
 
 
 class FusedLassoHyperparams(InferenceHyperparams):
-    prox_hyperparams: tuple[Array, Array] = eqx.field(
-        default=(0.25, 0.25), converter=as_prox_hyperparams
-    )
-    prox_reweight_coeff: tuple[Array, Array] = eqx.field(
-        default=(200.0, 200.0), converter=as_prox_hyperparams
+    prox: ProximalOperator = L1UnitTVProx(
+        Penalty(0.25, reweight=200.0), Penalty(0.25, reweight=200.0)
     )
 
     @override
     @classmethod
     def get_backend(
         cls, observation_model: ObservationModel | None = None
-    ) -> "FusedLassoNoObsInference":
+    ) -> "type[FusedLassoNoObsInference]":
         if observation_model is not None:
             raise NotImplementedError("fused lasso has no observation model backend")
-        return FusedLassoNoObsInference()
+        return FusedLassoNoObsInference
 
 
 def _lipschitz_constant(
@@ -61,35 +58,17 @@ def _lipschitz_constant(
     return jnp.linalg.eigvalsh(gram / variance[:, None, None])[:, -1].max()
 
 
-def _reweight_l1_and_tv(
-    coeffs: Array,
-    prox_hyperparams: tuple[Array, Array],
-    prox_reweight_coeff: tuple[Array, Array],
-) -> tuple[Array, Array]:
-    l1_coeff, tv_coeff = prox_hyperparams
-    l1_reweight_coeff, tv_reweight_coeff = prox_reweight_coeff
-
-    return (
-        reweight_prox_hyperparams(coeffs, l1_coeff, l1_reweight_coeff),
-        reweight_prox_hyperparams(
-            jnp.diff(coeffs, axis=0), tv_coeff, tv_reweight_coeff
-        ),
-    )
-
-
-@dataclass(frozen=True)
 class FusedLassoNoObsInference(NoObsInferenceBackend):
-    prox: Callable = prox_l1_unit_tv
-
     @override
     @staticmethod
     def initialize_hyperparams(**kwargs) -> FusedLassoHyperparams:
         return FusedLassoHyperparams(**kwargs)
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_batch(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -97,45 +76,46 @@ class FusedLassoNoObsInference(NoObsInferenceBackend):
     ) -> Array:
 
         infer_trial = functools.partial(
-            self.infer_trial,
+            cls.infer_trial,
             dynamics_model,
             hyperparams=hyperparams,
         )
         return lax.map(lambda trial: infer_trial(*trial), (states, targets))
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_trial(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
         hyperparams: FusedLassoHyperparams,
     ) -> Array:
 
-        per_operator_predictions = vmap(dynamics_model.compute_operator_predictions)(states)
+        per_operator_predictions = vmap(dynamics_model.compute_operator_predictions)(
+            states
+        )
         solver = ProximalGradient(
             functools.partial(
-                self.least_squares_sequence,
+                cls.least_squares_sequence,
                 dynamics_model=dynamics_model,
                 per_operator_predictions=per_operator_predictions,
                 states=states,
                 targets=targets,
             ),
-            self.prox,
+            apply_prox,
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
-            stepsize=lambda _, L=_lipschitz_constant(
-                dynamics_model, states, per_operator_predictions, targets
-            ): (1 / L),
+            stepsize=lambda _, L=_lipschitz_constant(dynamics_model, states, per_operator_predictions, targets): (
+                1 / L
+            ),
         )
 
         return solve_reweighted(
             solver,
             jnp.zeros((states.shape[0], dynamics_model.num_operators)),
-            hyperparams.prox_hyperparams,
-            hyperparams.prox_reweight_coeff,
-            reweight=_reweight_l1_and_tv,
+            hyperparams.prox,
         )
 
     @staticmethod

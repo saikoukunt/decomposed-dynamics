@@ -10,6 +10,7 @@ from jax import Array
 
 from decomposed_dynamics.dynamics_models import DecomposedLinearDynamics
 from decomposed_dynamics.inference import FusedLassoHyperparams
+from decomposed_dynamics.proximal_operators import L1UnitTVProx, Penalty
 
 
 def parse_args(argv: list):
@@ -197,8 +198,10 @@ def main():
     model, true_coeffs, states, targets = simulate_sparse_switching_dynamics(args, keys)
 
     inference_hyperparams = FusedLassoHyperparams(
-        prox_hyperparams=(args.l1_coeff, args.tv_coeff),
-        prox_reweight_coeff=(args.l1_reweight_coeff, args.tv_reweight_coeff),
+        prox=L1UnitTVProx(
+            l1=Penalty(args.l1_coeff, reweight=args.l1_reweight_coeff),
+            tv=Penalty(args.tv_coeff, reweight=args.tv_reweight_coeff),
+        ),
     )
     inference_backend = inference_hyperparams.get_backend()
     inferred_coeffs = inference_backend.infer_batch(

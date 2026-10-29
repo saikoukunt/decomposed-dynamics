@@ -1,12 +1,10 @@
 import functools
-from dataclasses import dataclass
-from typing import Callable, override
+from typing import override
 
 import equinox as eqx
 import jax.numpy as jnp
 from jax import Array, lax, vmap
 from jaxopt import ProximalGradient
-from jaxopt.prox import prox_non_negative_lasso
 
 from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel
 from decomposed_dynamics.inference.base import (
@@ -22,45 +20,38 @@ from decomposed_dynamics.loss_functions import (
 )
 from decomposed_dynamics.observation_models import ObservationModel
 from decomposed_dynamics.proximal_operators import (
-    as_prox_hyperparams,
-    prox_l1_group_lasso_binary,
-    reweight_grouped_prox_hyperparams,
-    reweight_prox_hyperparams,
+    NonNegativeL1Prox,
+    Penalty,
+    ProximalOperator,
+    apply_prox,
 )
 
 
 class BPDNDFHyperparams(InferenceHyperparams):
-    prox_hyperparams: Array | tuple[Array, ...] = eqx.field(
-        default=0.25, converter=as_prox_hyperparams
-    )
-    prox_reweight_coeff: Array | tuple[Array, ...] = eqx.field(
-        default=200.0, converter=as_prox_hyperparams
-    )
+    prox: ProximalOperator = NonNegativeL1Prox(Penalty(0.25, reweight=200.0))
     smooth_coeff: Array = eqx.field(default=0.4, converter=jnp.array)
 
     @override
     @classmethod
     def get_backend(
         cls, observation_model: ObservationModel | None = None
-    ) -> "BPDNDFInference | BPDNDFNoObsInference":
+    ) -> "type[BPDNDFInference | BPDNDFNoObsInference]":
         return (
-            BPDNDFNoObsInference() if observation_model is None else BPDNDFInference()
+            BPDNDFNoObsInference if observation_model is None else BPDNDFInference
         )
 
 
-@dataclass(frozen=True)
 class BPDNDFNoObsInference(NoObsInferenceBackend):
-    prox: Callable = prox_non_negative_lasso
-
     @override
     @staticmethod
     def initialize_hyperparams(**kwargs) -> BPDNDFHyperparams:
         return BPDNDFHyperparams(**kwargs)
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_trial(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -68,13 +59,13 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
     ) -> Array:
 
         solver = ProximalGradient(
-            functools.partial(self.bpdn_df_smooth_loss, dynamics_model=dynamics_model),
-            self.prox,
+            functools.partial(cls.bpdn_df_smooth_loss, dynamics_model=dynamics_model),
+            apply_prox,
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
         )
         infer_one_timestep = functools.partial(
-            self.infer_one_timestep,
+            cls.infer_one_timestep,
             dynamics_model=dynamics_model,
             solver=solver,
             hyperparams=hyperparams,
@@ -87,9 +78,9 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
 
         return coeffs
 
+    @staticmethod
     @eqx.filter_jit
     def infer_one_timestep(
-        self,
         carry: tuple[Array, Array],
         xs: tuple[Array, Array],
         dynamics_model: DecomposedDynamicsModel,
@@ -105,8 +96,7 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
         coeffs = solve_reweighted(
             solver,
             jnp.zeros(dynamics_model.num_operators),
-            hyperparams.prox_hyperparams,
-            hyperparams.prox_reweight_coeff,
+            hyperparams.prox,
             per_operator_predictions=per_operator_predictions,
             states=states,
             targets=targets,
@@ -136,11 +126,8 @@ class BPDNDFNoObsInference(NoObsInferenceBackend):
         return recon_loss + smooth_coeff * smoothness_loss
 
 
-@dataclass(frozen=True)
 class BPDNDFJointNoObsInference(NoObsInferenceBackend):
     """Solve a whole trial at once rather than scanning over timesteps."""
-
-    prox: Callable = prox_non_negative_lasso
 
     @override
     @staticmethod
@@ -148,9 +135,10 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
         return BPDNDFHyperparams(**kwargs)
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_batch(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -158,16 +146,17 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
     ) -> Array:
 
         infer_trial = functools.partial(
-            self.infer_trial,
+            cls.infer_trial,
             dynamics_model,
             hyperparams=hyperparams,
         )
         return lax.map(lambda trial: infer_trial(*trial), (states, targets))
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_trial(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -179,14 +168,14 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
         )
         solver = ProximalGradient(
             functools.partial(
-                self.bpdn_df_smooth_loss,
+                cls.bpdn_df_smooth_loss,
                 dynamics_model=dynamics_model,
                 per_operator_predictions=per_operator_predictions,
                 states=states,
                 targets=targets,
                 smooth_coeff=hyperparams.smooth_coeff,
             ),
-            self.prox,
+            apply_prox,
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
         )
@@ -194,8 +183,7 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
         return solve_reweighted(
             solver,
             jnp.zeros((states.shape[0], dynamics_model.num_operators)),
-            hyperparams.prox_hyperparams,
-            hyperparams.prox_reweight_coeff,
+            hyperparams.prox,
         )
 
     @staticmethod
@@ -217,19 +205,17 @@ class BPDNDFJointNoObsInference(NoObsInferenceBackend):
         return recon_loss + smooth_coeff * smoothness_loss
 
 
-@dataclass(frozen=True)
 class BPDNDFBatchNoObsInference(NoObsInferenceBackend):
-    prox: Callable = prox_l1_group_lasso_binary
-
     @override
     @staticmethod
     def initialize_hyperparams(**kwargs) -> BPDNDFHyperparams:
         return BPDNDFHyperparams(**kwargs)
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_batch(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -241,14 +227,14 @@ class BPDNDFBatchNoObsInference(NoObsInferenceBackend):
         )(states)
         solver = ProximalGradient(
             functools.partial(
-                self.bpdn_df_smooth_loss,
+                cls.bpdn_df_smooth_loss,
                 dynamics_model=dynamics_model,
                 per_operator_predictions=per_operator_predictions,
                 states=states,
                 targets=targets,
                 smooth_coeff=hyperparams.smooth_coeff,
             ),
-            self.prox,
+            apply_prox,
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
         )
@@ -256,14 +242,12 @@ class BPDNDFBatchNoObsInference(NoObsInferenceBackend):
         return solve_reweighted(
             solver,
             jnp.zeros((*states.shape[:2], dynamics_model.num_operators)),
-            hyperparams.prox_hyperparams,
-            hyperparams.prox_reweight_coeff,
-            reweight=reweight_grouped_prox_hyperparams,
+            hyperparams.prox,
         )
 
     @override
+    @staticmethod
     def infer_trial(
-        self,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -290,19 +274,17 @@ class BPDNDFBatchNoObsInference(NoObsInferenceBackend):
         return recon_loss + smooth_coeff * smoothness_loss
 
 
-@dataclass(frozen=True)
 class BPDNDFInference(InferenceBackend):
-    prox: Callable = prox_non_negative_lasso
-
     @override
     @staticmethod
     def initialize_hyperparams(**kwargs) -> BPDNDFHyperparams:
         return BPDNDFHyperparams(**kwargs)
 
     @override
+    @classmethod
     @eqx.filter_jit
     def infer_trial(
-        self,
+        cls,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
         observations: Array,
@@ -310,17 +292,17 @@ class BPDNDFInference(InferenceBackend):
     ) -> Array:
         solver = ProximalGradient(
             functools.partial(
-                self.bpdn_df_smooth_loss,
+                cls.bpdn_df_smooth_loss,
                 observation_model=observation_model,
                 dynamics_model=dynamics_model,
             ),
-            _prox_coeffs_only(self.prox, dynamics_model.state_dim),
+            _prox_coeffs_only(dynamics_model.state_dim),
             maxiter=hyperparams.max_iter,
             tol=hyperparams.tol,
         )
 
         infer_one_timestep = functools.partial(
-            self.infer_one_timestep,
+            cls.infer_one_timestep,
             observation_model=observation_model,
             dynamics_model=dynamics_model,
             solver=solver,
@@ -337,9 +319,9 @@ class BPDNDFInference(InferenceBackend):
 
         return state
 
+    @staticmethod
     @eqx.filter_jit
     def infer_one_timestep(
-        self,
         carry: tuple[Array, Array],
         observations: Array,
         observation_model: ObservationModel,
@@ -367,15 +349,8 @@ class BPDNDFInference(InferenceBackend):
         state = solve_reweighted(
             solver,
             jnp.zeros(dynamics_model.state_dim + dynamics_model.num_operators),
-            hyperparams.prox_hyperparams,
-            hyperparams.prox_reweight_coeff,
-            reweight=lambda state, prox_hyperparams, reweight_coeff: (
-                reweight_prox_hyperparams(
-                    state[..., dynamics_model.state_dim :],
-                    prox_hyperparams,
-                    reweight_coeff,
-                )
-            ),
+            hyperparams.prox,
+            num_latents=dynamics_model.state_dim,
             per_operator_predictions=per_operator_predictions,
             observations=observations,
             prev_latents=prev_latents,

@@ -1,6 +1,6 @@
 import functools
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Callable
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -9,7 +9,7 @@ from jaxopt import ProximalGradient
 
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.observation_models.base import ObservationModel
-from decomposed_dynamics.proximal_operators import reweight_prox_hyperparams
+from decomposed_dynamics.proximal_operators import ProximalOperator
 
 
 class InferenceHyperparams(eqx.Module):
@@ -20,18 +20,16 @@ class InferenceHyperparams(eqx.Module):
     @classmethod
     def get_backend(
         cls, observation_model: ObservationModel | None = None
-    ) -> "InferenceBackend | NoObsInferenceBackend":
+    ) -> "type[InferenceBackend | NoObsInferenceBackend]":
         raise NotImplementedError
 
 
-def _prox_coeffs_only(prox: Callable, num_latents: int) -> Callable:
-    """Apply `prox` to the operator coefficients of a `[latents, coeffs]` state only."""
+def _prox_coeffs_only(num_latents: int) -> Callable:
+    """Apply the prox to the operator coefficients of a `[latents, coeffs]` state only."""
 
-    def wrapped(x: Array, hyperparams_prox: Any, scaling: float = 1.0) -> Array:
+    def wrapped(x: Array, prox: ProximalOperator, scaling: float = 1.0) -> Array:
         latents, coeffs = x[..., :num_latents], x[..., num_latents:]
-        return jnp.concatenate(
-            [latents, prox(coeffs, hyperparams_prox, scaling)], axis=-1
-        )
+        return jnp.concatenate([latents, prox(coeffs, scaling)], axis=-1)
 
     return wrapped
 
@@ -39,15 +37,14 @@ def _prox_coeffs_only(prox: Callable, num_latents: int) -> Callable:
 def solve_reweighted(
     solver: ProximalGradient,
     init: Array,
-    prox_hyperparams: Array | tuple[Array, ...],
-    prox_reweight_coeff: Array | tuple[Array, ...],
-    reweight: Callable = reweight_prox_hyperparams,
+    prox: ProximalOperator,
+    num_latents: int = 0,
     **loss_kwargs,
 ) -> Array:
-    solution, _ = solver.run(init, hyperparams_prox=prox_hyperparams, **loss_kwargs)
+    solution, _ = solver.run(init, hyperparams_prox=prox, **loss_kwargs)
     solution, _ = solver.run(
         solution,
-        hyperparams_prox=reweight(solution, prox_hyperparams, prox_reweight_coeff),
+        hyperparams_prox=prox.reweight(solution[..., num_latents:]),
         **loss_kwargs,
     )
 
@@ -59,9 +56,10 @@ class NoObsInferenceBackend(ABC):
     def initialize_hyperparams(**kwargs) -> InferenceHyperparams:
         return InferenceHyperparams(**kwargs)
 
+    @classmethod
     @eqx.filter_jit
     def infer_batch(
-        self,
+        cls,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -69,15 +67,15 @@ class NoObsInferenceBackend(ABC):
     ) -> Array:
 
         infer_trial = functools.partial(
-            self.infer_trial,
+            cls.infer_trial,
             dynamics_model,
             hyperparams=hyperparams,
         )
         return vmap(infer_trial)(states, targets)
 
+    @staticmethod
     @abstractmethod
     def infer_trial(
-        self,
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
@@ -91,9 +89,10 @@ class InferenceBackend(ABC):
     def initialize_hyperparams(**kwargs) -> InferenceHyperparams:
         return InferenceHyperparams(**kwargs)
 
+    @classmethod
     @eqx.filter_jit
     def infer_batch(
-        self,
+        cls,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
         observations: Array,
@@ -101,7 +100,7 @@ class InferenceBackend(ABC):
     ) -> tuple[Array, Array]:
 
         infer_trial = functools.partial(
-            self.infer_trial,
+            cls.infer_trial,
             observation_model,
             dynamics_model,
             hyperparams=hyperparams,
@@ -113,9 +112,9 @@ class InferenceBackend(ABC):
             state[..., 1:, dynamics_model.state_dim :],
         )
 
+    @staticmethod
     @abstractmethod
     def infer_trial(
-        self,
         observation_model: ObservationModel,
         dynamics_model: DecomposedDynamicsModel,
         observations: Array,

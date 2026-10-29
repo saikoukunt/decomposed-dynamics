@@ -1,12 +1,12 @@
 import math
-from typing import Any, Optional
+from abc import abstractmethod
+from typing import Any, Optional, Self
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array, jit, tree_util, vmap
 from jaxopt.prox import prox_group_lasso, prox_lasso, prox_non_negative_lasso
-
-GROUP_PENALTY_INDEX = 1
 
 
 @jit
@@ -17,22 +17,106 @@ def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Arra
     return x
 
 
-def as_prox_hyperparams(x: Any) -> Array | tuple[Array, ...]:
-    """A tuple holds one entry per hyperparameter; anything else is a single one."""
-    return tuple(map(jnp.asarray, x)) if isinstance(x, tuple) else jnp.asarray(x)
-
-
 @jit
 def reweight_prox_hyperparams(
-    x: Array,
-    prox_hyperparams: Array | tuple[Array, ...],
-    reweight_coeff: Array | tuple[Array, ...],
-) -> Array | tuple[Array, ...]:
-    return jax.tree.map(
-        lambda hyperparam, reweight: hyperparam / (1 + reweight * jnp.abs(x)),
-        prox_hyperparams,
-        reweight_coeff,
-    )
+    x: Array, prox_hyperparams: Array, reweight_coeff: Array
+) -> Array:
+    return prox_hyperparams / (1 + reweight_coeff * jnp.abs(x))
+
+
+class Penalty(eqx.Module):
+    _lambda: Array = eqx.field(converter=jnp.asarray)
+    reweight: Array = eqx.field(default=0.0, converter=jnp.asarray)
+
+    def reweighted(self, x: Array) -> Self:
+        return Penalty(
+            reweight_prox_hyperparams(x, self._lambda, self.reweight), self.reweight
+        )
+
+
+def is_penalty(node: Any) -> bool:
+    return isinstance(node, Penalty)
+
+
+class ProximalOperator(eqx.Module):
+    @abstractmethod
+    def __call__(self, x: Array, scaling: float = 1.0) -> Array:
+        raise NotImplementedError
+
+    def reweight(self, x: Array) -> Self:
+        return jax.tree.map(lambda p: p.reweighted(x), self, is_leaf=is_penalty)
+
+    def interpolate(self, end: Self, frac: float) -> Self:
+        return jax.tree.map(
+            lambda a, b: Penalty(
+                a._lambda + frac * (b._lambda - a._lambda), a.reweight
+            ),
+            self,
+            end,
+            is_leaf=is_penalty,
+        )
+
+
+class NonNegativeL1Prox(ProximalOperator):
+    l1: Penalty
+
+    def __call__(self, x: Array, scaling: float = 1.0) -> Array:
+        return prox_non_negative_lasso(x, self.l1._lambda, scaling)
+
+
+class L1BinaryProx(ProximalOperator):
+    l1: Penalty
+    binary: Penalty
+
+    def __call__(self, x: Array, scaling: float = 1.0) -> Array:
+        x = prox_non_negative_lasso(x, self.l1._lambda, scaling)
+        x = jnp.clip(x, max=1.0)
+        return prox_binary(x, self.binary._lambda, scaling)
+
+
+class L1GroupBinaryProx(ProximalOperator):
+    l1: Penalty
+    group: Penalty
+    binary: Penalty
+
+    def __call__(self, x: Array, scaling: float = 1.0) -> Array:
+        group_coeff = jnp.broadcast_to(
+            self.group._lambda * jnp.sqrt(_group_size(x)), x.shape[-1:]
+        )
+        x = prox_non_negative_lasso(x, self.l1._lambda, scaling)
+        x = jnp.clip(x, max=1.0)
+        x = vmap(prox_group_lasso, in_axes=(-1, 0, None), out_axes=-1)(
+            x, group_coeff, scaling
+        )
+        return prox_binary(x, self.binary._lambda, scaling)
+
+    def reweight(self, x: Array) -> Self:
+        group_norms = jnp.linalg.norm(x, axis=tuple(range(x.ndim - 1))) / jnp.sqrt(
+            _group_size(x)
+        )
+        return L1GroupBinaryProx(
+            self.l1.reweighted(x),
+            self.group.reweighted(group_norms),
+            self.binary.reweighted(x),
+        )
+
+
+class L1UnitTVProx(ProximalOperator):
+    l1: Penalty
+    tv: Penalty
+
+    def __call__(self, x: Array, scaling: float = 1.0) -> Array:
+        x = prox_unit_tv(x, self.tv._lambda, scaling)
+        return prox_lasso(x, self.l1._lambda, scaling)
+
+    def reweight(self, x: Array) -> Self:
+        return L1UnitTVProx(
+            self.l1.reweighted(x), self.tv.reweighted(jnp.diff(x, axis=0))
+        )
+
+
+def apply_prox(x: Array, prox: ProximalOperator, scaling: float = 1.0) -> Array:
+    return prox(x, scaling)
 
 
 def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -> Any:
@@ -56,53 +140,8 @@ def prox_binary(x: Any, _lambda: Optional[float] = None, scaling: float = 1.0) -
     return tree_util.tree_map(prox, x)
 
 
-def prox_l1_binary(
-    x: Any, hyperparams_prox: tuple[Array, Array], scaling: float = 1.0
-) -> Any:
-    l1_coeff, _lambda = hyperparams_prox
-    x = prox_non_negative_lasso(x, l1_coeff, scaling)
-    x = jnp.clip(x, max=1.0)
-    x = prox_binary(x, _lambda, scaling)
-
-    return x
-
-
 def _group_size(x: Array) -> int:
     return math.prod(x.shape[:-1])
-
-
-def prox_l1_group_lasso_binary(
-    x: Array, hyperparams_prox: tuple[Array, Array, Array], scaling: float = 1.0
-) -> Array:
-    l1_coeff, group_lasso_coeff, _lambda = hyperparams_prox
-    group_lasso_coeff = jnp.broadcast_to(
-        group_lasso_coeff * jnp.sqrt(_group_size(x)), x.shape[-1:]
-    )
-
-    x = prox_non_negative_lasso(x, l1_coeff, scaling)
-    x = jnp.clip(x, max=1.0)
-    x = vmap(prox_group_lasso, in_axes=(-1, 0, None), out_axes=-1)(
-        x, group_lasso_coeff, scaling
-    )
-    x = prox_binary(x, _lambda, scaling)
-
-    return x
-
-
-def reweight_grouped_prox_hyperparams(
-    x: Array,
-    prox_hyperparams: tuple[Array, Array, Array],
-    reweight_coeff: tuple[Array, Array, Array],
-) -> tuple[Array, Array, Array]:
-    reweighted = list(reweight_prox_hyperparams(x, prox_hyperparams, reweight_coeff))
-    group_norms = jnp.linalg.norm(x, axis=tuple(range(x.ndim - 1))) / jnp.sqrt(
-        _group_size(x)
-    )
-    reweighted[GROUP_PENALTY_INDEX] = prox_hyperparams[GROUP_PENALTY_INDEX] / (
-        1 + reweight_coeff[GROUP_PENALTY_INDEX] * group_norms
-    )
-
-    return tuple(reweighted)
 
 
 def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
@@ -134,13 +173,3 @@ def prox_unit_tv(x: Any, _lambda: Array, scaling: float = 1.0) -> Any:
     p, _, _ = jax.lax.fori_loop(0, n_iter, body, (p_0, p_0, 1.0))
 
     return project_on_C(x - DT(p))
-
-
-def prox_l1_unit_tv(
-    x: Any, hyperparams_prox: tuple[Array, Array], scaling: float = 1.0
-) -> Any:
-    l1_coeff, _lambda = hyperparams_prox
-    x = prox_unit_tv(x, _lambda, scaling)
-    x = prox_lasso(x, l1_coeff, scaling)
-
-    return x

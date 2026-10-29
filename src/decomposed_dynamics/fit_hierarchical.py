@@ -20,11 +20,10 @@ from decomposed_dynamics.inference import (
     InferenceHyperparams,
     NoObsInferenceBackend,
 )
-from decomposed_dynamics.proximal_operators import as_prox_hyperparams
+from decomposed_dynamics.proximal_operators import ProximalOperator
 from decomposed_dynamics.utils import (
     eqx_module_to_string,
     extract_snippets,
-    interpolate,
     make_filter_spec,
 )
 
@@ -39,9 +38,9 @@ def fit_hierarchical_mlps(
     lr_end: float,
     max_iter: int = 200,
     frozen: Callable = lambda model: model.primitives,
-    inference_backend: NoObsInferenceBackend = BPDNDFNoObsInference(),
+    inference_backend: type[NoObsInferenceBackend] = BPDNDFNoObsInference,
     inference_hyperparams: dict | InferenceHyperparams = {},
-    prox_hyperparams_max: float | tuple = 0.4,
+    prox_end: ProximalOperator | None = None,
 ) -> HierarchicalDecomposedDynamics:
 
     progress_bar = trange(max_iter)
@@ -51,8 +50,8 @@ def fit_hierarchical_mlps(
     opt_state = optimizer.init(
         eqx.filter(eqx.filter(dynamics_model, filter_spec), eqx.is_inexact_array)
     )
-    prox_hyperparams_start = inference_hyperparams.prox_hyperparams
-    prox_hyperparams_max = as_prox_hyperparams(prox_hyperparams_max)
+    prox_start = inference_hyperparams.prox
+    prox_end = prox_start if prox_end is None else prox_end
 
     for i in progress_bar:
         latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
@@ -60,9 +59,7 @@ def fit_hierarchical_mlps(
 
         inference_hyperparams = replace(
             inference_hyperparams,
-            prox_hyperparams=interpolate(
-                prox_hyperparams_start, prox_hyperparams_max, min(2 * i / max_iter, 1)
-            ),
+            prox=prox_start.interpolate(prox_end, min(2 * i / max_iter, 1)),
         )
         mlp_coeffs = inference_backend.infer_batch(
             dynamics_model.coefficient_model(),
