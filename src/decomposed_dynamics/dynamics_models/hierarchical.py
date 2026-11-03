@@ -84,6 +84,17 @@ class HierarchicalDecomposedDynamics(DecomposedDynamicsModel):
             key=key,
         )
 
+    def center_mlps(self, mean_coeffs: Array, weight_scale: float = 0.1) -> Self:
+        last = self.G.layers[-1]
+        return eqx.tree_at(
+            lambda model: (model.G.layers[-1].weight, model.G.layers[-1].bias),
+            self,
+            (
+                weight_scale * last.weight,
+                jnp.broadcast_to(mean_coeffs, last.bias.shape),
+            ),
+        )
+
     @override
     def initialize_hyperparams(self, **kwargs) -> OperatorHyperparams:
         primitive_hyperparams = self.primitives.initialize_hyperparams(**kwargs)

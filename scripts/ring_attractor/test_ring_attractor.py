@@ -23,10 +23,17 @@ from decomposed_dynamics.dynamics_models import (
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 from decomposed_dynamics.fit_hierarchical import fit_hierarchical_mlps
 from decomposed_dynamics.fitting import fit
-from decomposed_dynamics.inference import BPDNDFHyperparams, NoObsInferenceBackend
+from decomposed_dynamics.inference import (
+    BPDNDFHyperparams,
+    InferenceHyperparams,
+    NoObsInferenceBackend,
+)
+from decomposed_dynamics.inference.binary_coordinate_descent import (
+    BinaryCoordinateDescentHyperparams,
+    BinaryCoordinateDescentNoObsInference,
+)
 from decomposed_dynamics.inference.bpdn import BPDNDFJointNoObsInference
 from decomposed_dynamics.proximal_operators import (
-    L1BinaryProx,
     NonNegativeL1Prox,
     Penalty,
 )
@@ -75,21 +82,18 @@ class HierarchicalFitParams(SavedParams):
     max_iter: int = 2000
     lr_init: float = 1e-3
     lr_end: float = 1e-4
-    inference_backend: type[NoObsInferenceBackend] = BPDNDFJointNoObsInference
-    start_hyperparams: BPDNDFHyperparams = field(
-        default_factory=lambda: BPDNDFHyperparams(
-            prox=L1BinaryProx(
-                l1=Penalty(0.0, reweight=200), binary=Penalty(0.5)
-            ),
-            smooth_coeff=0.4,
+    init_weight_scale: float = 0.1
+    inference_backend: type[NoObsInferenceBackend] = (
+        BinaryCoordinateDescentNoObsInference
+    )
+    start_hyperparams: InferenceHyperparams = field(
+        default_factory=lambda: BinaryCoordinateDescentHyperparams(
+            l0=0.1, group=0.5, smooth_coeff=0.4
         )
     )
-    end_hyperparams: BPDNDFHyperparams = field(
-        default_factory=lambda: BPDNDFHyperparams(
-            prox=L1BinaryProx(
-                l1=Penalty(0.1, reweight=200), binary=Penalty(0.5)
-            ),
-            smooth_coeff=0.4,
+    end_hyperparams: InferenceHyperparams = field(
+        default_factory=lambda: BinaryCoordinateDescentHyperparams(
+            l0=0.1, group=0.5, smooth_coeff=0.4
         )
     )
 
@@ -202,6 +206,7 @@ def fit_hierarchical(
     trajectory_dict = {i: trajectories[i, :-1, :] for i in range(trajectories.shape[0])}
     dlds_coeff_dict = {i: dlds_coeffs[i] for i in range(dlds_coeffs.shape[0])}
 
+    model = model.center_mlps(dlds_coeffs.mean(axis=(0, 1)), params.init_weight_scale)
     model = fit_hierarchical_mlps(
         trajectory_dict,
         dlds_coeff_dict,
