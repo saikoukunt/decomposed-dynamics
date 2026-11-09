@@ -19,16 +19,16 @@ from decomposed_dynamics.inference import (
     BPDNDFHyperparams,
     BPDNDFNoObsInference,
     NoObsInferenceBackend,
+    Penalty,
 )
 from decomposed_dynamics.inference.bpdn import BPDNDFBatchNoObsInference
 from decomposed_dynamics.inference.fused_lasso import (
     FusedLassoHyperparams,
     FusedLassoNoObsInference,
 )
-from decomposed_dynamics.proximal_operators import (
+from decomposed_dynamics.inference.proximal_operators import (
     L1BinaryProx,
     L1GroupBinaryProx,
-    Penalty,
 )
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -66,7 +66,7 @@ class FlatMLPFitParams(SavedParams):
                 group=Penalty(0.0, reweight=200),
                 binary=Penalty(0.4),
             ),
-            smooth_coeff=0.4,
+            smooth_coeff=Penalty(0.4),
         )
     )
     end_hyperparams: BPDNDFHyperparams = field(
@@ -76,7 +76,7 @@ class FlatMLPFitParams(SavedParams):
                 group=Penalty([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], reweight=5),
                 binary=Penalty(0.5),
             ),
-            smooth_coeff=0.4,
+            smooth_coeff=Penalty(0.4),
         )
     )
     # inference_backend: type[NoObsInferenceBackend] = BPDNDFNoObsInference
@@ -115,7 +115,7 @@ def fit_flat_mlp(model: MLPDecomposedDynamics, trajectories, params: FlatMLPFitP
             normalization_grid=visited_grid(trajectories),
             decorr_coeff=params.decorr_coeff,
         ),
-        prox_end=params.end_hyperparams.prox,
+        inference_hyperparams_end=params.end_hyperparams,
     )
     mlp_coeffs = params.inference_backend.infer_batch(
         model,

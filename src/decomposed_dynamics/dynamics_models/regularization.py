@@ -6,6 +6,21 @@ from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
 
 
 @jit
+def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Array:
+    reweighted_coeffs = reweight_prox_hyperparams(x, l1_coeff, reweight_coeff)
+    x = jnp.sign(x) * jnp.maximum(jnp.abs(x) - reweighted_coeffs, 0)
+
+    return x
+
+
+@jit
+def reweight_prox_hyperparams(
+    x: Array, prox_hyperparams: Array, reweight_coeff: Array
+) -> Array:
+    return prox_hyperparams / (1 + reweight_coeff * jnp.abs(x))
+
+
+@jit
 def spectral_normalize(F: Array):
     return F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
 

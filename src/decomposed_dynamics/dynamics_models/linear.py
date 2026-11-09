@@ -13,9 +13,9 @@ from decomposed_dynamics.dynamics_models.base import (
 )
 from decomposed_dynamics.dynamics_models.regularization import (
     operator_correlation,
+    reweighted_l1_prox,
     spectral_normalize,
 )
-from decomposed_dynamics.proximal_operators import reweighted_l1_prox
 
 
 @dataclass(frozen=True)

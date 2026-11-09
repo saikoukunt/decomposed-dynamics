@@ -11,16 +11,16 @@ from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel
 from decomposed_dynamics.inference.base import (
     InferenceHyperparams,
     NoObsInferenceBackend,
+    Penalty,
+)
+from decomposed_dynamics.inference.proximal_operators import (
+    L1UnitTVProx,
+    ProximalOperator,
+    apply_prox,
     solve_reweighted,
 )
 from decomposed_dynamics.loss_functions import normalized_dynamics_reconstruction_loss
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.proximal_operators import (
-    L1UnitTVProx,
-    Penalty,
-    ProximalOperator,
-    apply_prox,
-)
 
 
 class FusedLassoHyperparams(InferenceHyperparams):

@@ -1,41 +1,15 @@
 import math
 from abc import abstractmethod
-from typing import Any, Optional, Self
+from typing import Any, Callable, Optional, Self
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax import Array, jit, tree_util, vmap
+from jax import Array, tree_util, vmap
+from jaxopt import ProximalGradient
 from jaxopt.prox import prox_group_lasso, prox_lasso, prox_non_negative_lasso
 
-
-@jit
-def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Array:
-    reweighted_coeffs = reweight_prox_hyperparams(x, l1_coeff, reweight_coeff)
-    x = jnp.sign(x) * jnp.maximum(jnp.abs(x) - reweighted_coeffs, 0)
-
-    return x
-
-
-@jit
-def reweight_prox_hyperparams(
-    x: Array, prox_hyperparams: Array, reweight_coeff: Array
-) -> Array:
-    return prox_hyperparams / (1 + reweight_coeff * jnp.abs(x))
-
-
-class Penalty(eqx.Module):
-    _lambda: Array = eqx.field(converter=jnp.asarray)
-    reweight: Array = eqx.field(default=0.0, converter=jnp.asarray)
-
-    def reweighted(self, x: Array) -> Self:
-        return Penalty(
-            reweight_prox_hyperparams(x, self._lambda, self.reweight), self.reweight
-        )
-
-
-def is_penalty(node: Any) -> bool:
-    return isinstance(node, Penalty)
+from decomposed_dynamics.inference.base import Penalty, is_penalty
 
 
 class ProximalOperator(eqx.Module):
@@ -46,15 +20,32 @@ class ProximalOperator(eqx.Module):
     def reweight(self, x: Array) -> Self:
         return jax.tree.map(lambda p: p.reweighted(x), self, is_leaf=is_penalty)
 
-    def interpolate(self, end: Self, frac: float) -> Self:
-        return jax.tree.map(
-            lambda a, b: Penalty(
-                a._lambda + frac * (b._lambda - a._lambda), a.reweight
-            ),
-            self,
-            end,
-            is_leaf=is_penalty,
-        )
+
+def _prox_coeffs_only(num_latents: int) -> Callable:
+    """Apply the prox to the operator coefficients of a `[latents, coeffs]` state only."""
+
+    def wrapped(x: Array, prox: ProximalOperator, scaling: float = 1.0) -> Array:
+        latents, coeffs = x[..., :num_latents], x[..., num_latents:]
+        return jnp.concatenate([latents, prox(coeffs, scaling)], axis=-1)
+
+    return wrapped
+
+
+def solve_reweighted(
+    solver: ProximalGradient,
+    init: Array,
+    prox: ProximalOperator,
+    num_latents: int = 0,
+    **loss_kwargs,
+) -> Array:
+    solution, _ = solver.run(init, hyperparams_prox=prox, **loss_kwargs)
+    solution, _ = solver.run(
+        solution,
+        hyperparams_prox=prox.reweight(solution[..., num_latents:]),
+        **loss_kwargs,
+    )
+
+    return jnp.where(jnp.any(jnp.isnan(solution)), jnp.zeros_like(solution), solution)
 
 
 class NonNegativeL1Prox(ProximalOperator):

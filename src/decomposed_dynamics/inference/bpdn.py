@@ -11,7 +11,13 @@ from decomposed_dynamics.inference.base import (
     InferenceBackend,
     InferenceHyperparams,
     NoObsInferenceBackend,
+    Penalty,
+)
+from decomposed_dynamics.inference.proximal_operators import (
+    NonNegativeL1Prox,
+    ProximalOperator,
     _prox_coeffs_only,
+    apply_prox,
     solve_reweighted,
 )
 from decomposed_dynamics.loss_functions import (
@@ -19,17 +25,11 @@ from decomposed_dynamics.loss_functions import (
     normalized_dynamics_reconstruction_loss,
 )
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.proximal_operators import (
-    NonNegativeL1Prox,
-    Penalty,
-    ProximalOperator,
-    apply_prox,
-)
 
 
 class BPDNDFHyperparams(InferenceHyperparams):
     prox: ProximalOperator = NonNegativeL1Prox(Penalty(0.25, reweight=200.0))
-    smooth_coeff: Array = eqx.field(default=0.4, converter=jnp.array)
+    smooth_coeff: Penalty = Penalty(0.4)
 
     @override
     @classmethod

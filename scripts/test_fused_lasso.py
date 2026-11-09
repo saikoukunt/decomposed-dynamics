@@ -9,8 +9,8 @@ import numpy as np
 from jax import Array
 
 from decomposed_dynamics.dynamics_models import DecomposedLinearDynamics
-from decomposed_dynamics.inference import FusedLassoHyperparams
-from decomposed_dynamics.proximal_operators import L1UnitTVProx, Penalty
+from decomposed_dynamics.inference import FusedLassoHyperparams, Penalty
+from decomposed_dynamics.inference.proximal_operators import L1UnitTVProx
 
 
 def parse_args(argv: list):

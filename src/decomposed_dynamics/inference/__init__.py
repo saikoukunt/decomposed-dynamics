@@ -2,8 +2,8 @@ from decomposed_dynamics.inference.base import (
     InferenceBackend,
     InferenceHyperparams,
     NoObsInferenceBackend,
-    InferenceHyperparams,
-    solve_reweighted,
+    Penalty,
+    interpolate_penalties,
 )
 from decomposed_dynamics.inference.bpdn import (
     BPDNDFBatchNoObsInference,
@@ -16,3 +16,4 @@ from decomposed_dynamics.inference.fused_lasso import (
     FusedLassoHyperparams,
     FusedLassoNoObsInference,
 )
+from decomposed_dynamics.inference.proximal_operators import solve_reweighted

@@ -8,22 +8,16 @@ from decomposed_dynamics.dynamics_models import DecomposedDynamicsModel
 from decomposed_dynamics.inference.base import (
     InferenceHyperparams,
     NoObsInferenceBackend,
+    Penalty,
 )
 from decomposed_dynamics.loss_functions import normalized_dynamics_reconstruction_loss
-from decomposed_dynamics.proximal_operators import (
-    NonNegativeL1Prox,
-    Penalty,
-    ProximalOperator,
-)
 
 
 class BinaryCoordinateDescentHyperparams(InferenceHyperparams):
-    l0: Array = eqx.field(default=0.1, converter=jnp.array)
-    group: Array = eqx.field(default=0.5, converter=jnp.array)
-    smooth_coeff: Array = eqx.field(default=0.4, converter=jnp.array)
+    l0: Penalty = Penalty(0.1)
+    group: Penalty = Penalty(0.5)
+    smooth_coeff: Penalty = Penalty(0.4)
     num_sweeps: int = eqx.field(static=True, default=10)
-    # unused; fit_hierarchical_mlps anneals `prox`
-    prox: ProximalOperator = NonNegativeL1Prox(Penalty(0.0))
 
 
 def viterbi(state_objective_costs: Array, switch_costs: Array) -> tuple[Array, Array]:

@@ -1,15 +1,57 @@
 import functools
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Any, Self
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jax import Array, vmap
-from jaxopt import ProximalGradient
 
 from decomposed_dynamics.dynamics_models.base import DecomposedDynamicsModel
+from decomposed_dynamics.dynamics_models.regularization import (
+    reweight_prox_hyperparams,
+)
 from decomposed_dynamics.observation_models.base import ObservationModel
-from decomposed_dynamics.proximal_operators import ProximalOperator
+
+
+class Penalty(eqx.Module):
+    """Penalty coefficient; acts as its value `_lambda` in arithmetic and jnp functions."""
+
+    _lambda: Array = eqx.field(converter=jnp.asarray)
+    reweight: Array = eqx.field(default=0.0, converter=jnp.asarray)
+
+    def reweighted(self, x: Array) -> Self:
+        return Penalty(
+            reweight_prox_hyperparams(x, self._lambda, self.reweight), self.reweight
+        )
+
+    def __jax_array__(self) -> Array:
+        return self._lambda
+
+    # python scalars don't go through __jax_array__
+    def __mul__(self, other: Any) -> Array:
+        return self._lambda * other
+
+    def __rmul__(self, other: Any) -> Array:
+        return other * self._lambda
+
+
+def is_penalty(node: Any) -> bool:
+    return isinstance(node, Penalty)
+
+
+def interpolate_penalties[T](start: T, end: T, frac: float) -> T:
+    """Interpolate the value of every `Penalty` in `start` toward `end`; other leaves stay at `start`."""
+    return jax.tree.map(
+        lambda a, b: (
+            Penalty(a._lambda + frac * (b._lambda - a._lambda), a.reweight)
+            if is_penalty(a)
+            else a
+        ),
+        start,
+        end,
+        is_leaf=is_penalty,
+    )
 
 
 class InferenceHyperparams(eqx.Module):
@@ -22,33 +64,6 @@ class InferenceHyperparams(eqx.Module):
         cls, observation_model: ObservationModel | None = None
     ) -> "type[InferenceBackend | NoObsInferenceBackend]":
         raise NotImplementedError
-
-
-def _prox_coeffs_only(num_latents: int) -> Callable:
-    """Apply the prox to the operator coefficients of a `[latents, coeffs]` state only."""
-
-    def wrapped(x: Array, prox: ProximalOperator, scaling: float = 1.0) -> Array:
-        latents, coeffs = x[..., :num_latents], x[..., num_latents:]
-        return jnp.concatenate([latents, prox(coeffs, scaling)], axis=-1)
-
-    return wrapped
-
-
-def solve_reweighted(
-    solver: ProximalGradient,
-    init: Array,
-    prox: ProximalOperator,
-    num_latents: int = 0,
-    **loss_kwargs,
-) -> Array:
-    solution, _ = solver.run(init, hyperparams_prox=prox, **loss_kwargs)
-    solution, _ = solver.run(
-        solution,
-        hyperparams_prox=prox.reweight(solution[..., num_latents:]),
-        **loss_kwargs,
-    )
-
-    return jnp.where(jnp.any(jnp.isnan(solution)), jnp.zeros_like(solution), solution)
 
 
 class NoObsInferenceBackend(ABC):
