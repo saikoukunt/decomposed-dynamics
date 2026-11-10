@@ -13,7 +13,7 @@ from decomposed_dynamics.inference.base import (
 from decomposed_dynamics.loss_functions import normalized_dynamics_reconstruction_loss
 
 
-class BinaryCoordinateDescentHyperparams(InferenceHyperparams):
+class BinaryViterbiHyperparams(InferenceHyperparams):
     l0: Penalty = Penalty(0.1)
     group: Penalty = Penalty(0.5)
     smooth_coeff: Penalty = Penalty(0.4)
@@ -53,11 +53,11 @@ def viterbi(state_objective_costs: Array, switch_costs: Array) -> tuple[Array, A
     )
 
 
-class BinaryCoordinateDescentNoObsInference(NoObsInferenceBackend):
+class BinaryViterbiNoObsInference(NoObsInferenceBackend):
     @override
     @staticmethod
-    def initialize_hyperparams(**kwargs) -> BinaryCoordinateDescentHyperparams:
-        return BinaryCoordinateDescentHyperparams(**kwargs)
+    def initialize_hyperparams(**kwargs) -> BinaryViterbiHyperparams:
+        return BinaryViterbiHyperparams(**kwargs)
 
     @override
     @classmethod
@@ -67,7 +67,7 @@ class BinaryCoordinateDescentNoObsInference(NoObsInferenceBackend):
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
-        hyperparams: BinaryCoordinateDescentHyperparams,
+        hyperparams: BinaryViterbiHyperparams,
     ) -> Array:
         objective = BinaryObjective(dynamics_model, states, targets, hyperparams)
         initial_coeffs = best_single_operator_per_timepoint(objective)
@@ -97,7 +97,7 @@ class BinaryCoordinateDescentNoObsInference(NoObsInferenceBackend):
         dynamics_model: DecomposedDynamicsModel,
         states: Array,
         targets: Array,
-        hyperparams: BinaryCoordinateDescentHyperparams,
+        hyperparams: BinaryViterbiHyperparams,
     ) -> Array:
         raise NotImplementedError("the group penalty couples trials; use infer_batch")
 
@@ -107,7 +107,7 @@ class BinaryObjective(eqx.Module):
     states: Array
     targets: Array
     per_operator_predictions: Array
-    hyperparams: BinaryCoordinateDescentHyperparams
+    hyperparams: BinaryViterbiHyperparams
 
     def __init__(self, dynamics_model, states, targets, hyperparams):
         self.dynamics_model = dynamics_model

@@ -30,8 +30,8 @@ from decomposed_dynamics.inference import (
     Penalty,
 )
 from decomposed_dynamics.inference.binary_coordinate_descent import (
-    BinaryCoordinateDescentHyperparams,
-    BinaryCoordinateDescentNoObsInference,
+    BinaryViterbiHyperparams,
+    BinaryViterbi,
 )
 from decomposed_dynamics.inference.bpdn import BPDNDFJointNoObsInference
 from decomposed_dynamics.inference.proximal_operators import NonNegativeL1Prox
@@ -64,7 +64,8 @@ class DLDSFitParams(SavedParams):
     inference_backend: type[NoObsInferenceBackend] = BPDNDFJointNoObsInference
     inference_hyperparams: BPDNDFHyperparams = field(
         default_factory=lambda: BPDNDFHyperparams(
-            prox=NonNegativeL1Prox(Penalty(0.3, reweight=200.0)), smooth_coeff=Penalty(0.1)
+            prox=NonNegativeL1Prox(Penalty(0.3, reweight=200.0)),
+            smooth_coeff=Penalty(0.1),
         )
     )
 
@@ -82,16 +83,16 @@ class HierarchicalFitParams(SavedParams):
     lr_end: float = 1e-4
     init_weight_scale: float = 0.1
     inference_backend: type[NoObsInferenceBackend] = (
-        BinaryCoordinateDescentNoObsInference
+        BinaryViterbi
     )
     start_hyperparams: InferenceHyperparams = field(
-        default_factory=lambda: BinaryCoordinateDescentHyperparams(
+        default_factory=lambda: BinaryViterbiHyperparams(
             l0=Penalty(0.1), group=Penalty(0.0), smooth_coeff=Penalty(0.4)
         )
     )
     end_hyperparams: InferenceHyperparams = field(
-        default_factory=lambda: BinaryCoordinateDescentHyperparams(
-            l0=Penalty(0.1), group=Penalty(0.5), smooth_coeff=Penalty(0.4)
+        default_factory=lambda: BinaryViterbiHyperparams(
+            l0=Penalty(0.1), group=Penalty(0.2), smooth_coeff=Penalty(0.4)
         )
     )
 
