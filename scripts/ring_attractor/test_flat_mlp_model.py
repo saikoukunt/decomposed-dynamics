@@ -55,12 +55,12 @@ class FlatMLPFitParams(SavedParams):
     )
     start_hyperparams: InferenceHyperparams = field(
         default_factory=lambda: BinaryViterbiHyperparams(
-            l0=Penalty(0.1), group=Penalty(0.2), smooth_coeff=Penalty(0.4)
+            l0=Penalty(0.1), group=Penalty(0.2), switch_penalty=Penalty(0.4)
         )
     )
     end_hyperparams: InferenceHyperparams = field(
         default_factory=lambda: BinaryViterbiHyperparams(
-            l0=Penalty(0.1), group=Penalty(0.2), smooth_coeff=Penalty(0.4)
+            l0=Penalty(0.1), group=Penalty(0.2), switch_penalty=Penalty(0.4)
         )
     )
 

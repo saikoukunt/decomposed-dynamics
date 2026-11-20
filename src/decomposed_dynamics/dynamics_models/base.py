@@ -43,8 +43,10 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @eqx.filter_jit
-    def combine_operator_predictions(self, x: Array, c: Array, preds: Array) -> Array:
-        return linear_combination(c, preds)
+    def combine_operator_predictions(
+        self, x: Array, c: Array, per_operator_predictions: Array
+    ) -> Array:
+        return linear_combination(c, per_operator_predictions)
 
     def compute_operator_flows(self, x: Array) -> Array:
         return self.compute_operator_predictions(x) - x[..., None, :]
@@ -60,8 +62,10 @@ class DeltaDynamics(DecomposedDynamicsModel):
         super().__init__(*args, **kwargs)
 
     @eqx.filter_jit
-    def combine_operator_predictions(self, x: Array, c: Array, preds: Array) -> Array:
-        return x + self.dt * linear_combination(c, preds)
+    def combine_operator_predictions(
+        self, x: Array, c: Array, per_operator_predictions: Array
+    ) -> Array:
+        return x + self.dt * linear_combination(c, per_operator_predictions)
 
     def compute_operator_flows(self, x: Array) -> Array:
         return self.compute_operator_predictions(x)

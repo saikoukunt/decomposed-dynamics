@@ -28,12 +28,14 @@ class Penalty(eqx.Module):
     def __jax_array__(self) -> Array:
         return self._lambda
 
-    # python scalars don't go through __jax_array__
     def __mul__(self, other: Any) -> Array:
         return self._lambda * other
 
     def __rmul__(self, other: Any) -> Array:
         return other * self._lambda
+
+    def __neg__(self) -> Array:
+        return -self._lambda
 
 
 def is_penalty(node: Any) -> bool:
@@ -41,7 +43,6 @@ def is_penalty(node: Any) -> bool:
 
 
 def interpolate_penalties[T](start: T, end: T, frac: float) -> T:
-    """Interpolate the value of every `Penalty` in `start` toward `end`; other leaves stay at `start`."""
     return jax.tree.map(
         lambda a, b: (
             Penalty(a._lambda + frac * (b._lambda - a._lambda), a.reweight)
