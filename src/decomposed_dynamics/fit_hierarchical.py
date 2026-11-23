@@ -1,0 +1,211 @@
+import functools
+from typing import Callable
+
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+import optax
+from jax import Array, vmap
+from jaxopt import ProximalGradient
+from optax import l2_loss
+from tqdm import trange
+
+from decomposed_dynamics.dynamics_models import (
+    HierarchicalDecomposedDynamics,
+    linear_combination,
+)
+from decomposed_dynamics.inference import (
+    BPDNDFNoObsInference,
+    InferenceHyperparams,
+    NoObsInferenceBackend,
+    interpolate_penalties,
+)
+from decomposed_dynamics.utils import (
+    eqx_module_to_string,
+    extract_snippets,
+    make_filter_spec,
+)
+
+
+def fit_hierarchical_mlps(
+    data: dict,
+    C: dict,
+    dynamics_model: HierarchicalDecomposedDynamics,
+    samples_per_snippet: int,
+    num_snippets: int,
+    lr_init: float,
+    lr_end: float,
+    max_iter: int = 200,
+    frozen: Callable = lambda model: model.primitives,
+    inference_backend: type[NoObsInferenceBackend] = BPDNDFNoObsInference,
+    inference_hyperparams: dict | InferenceHyperparams = {},
+    inference_hyperparams_end: InferenceHyperparams | None = None,
+) -> HierarchicalDecomposedDynamics:
+
+    progress_bar = trange(max_iter)
+    filter_spec = make_filter_spec(dynamics_model, frozen)
+
+    optimizer = optax.adam(optax.linear_schedule(lr_init, lr_end, max_iter))
+    opt_state = optimizer.init(
+        eqx.filter(eqx.filter(dynamics_model, filter_spec), eqx.is_inexact_array)
+    )
+    inference_hyperparams_start = inference_hyperparams
+    if inference_hyperparams_end is None:
+        inference_hyperparams_end = inference_hyperparams_start
+
+    for i in progress_bar:
+        latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
+        C_batch, _ = extract_snippets(C, num_snippets, samples_per_snippet, seed=i)
+
+        inference_hyperparams = interpolate_penalties(
+            inference_hyperparams_start,
+            inference_hyperparams_end,
+            min(2 * i / max_iter, 1),
+        )
+        mlp_coeffs = inference_backend.infer_batch(
+            dynamics_model.coefficient_model(),
+            latents,
+            C_batch,
+            inference_hyperparams,
+        )
+        # if i == 0:
+        #     print(C_batch.shape)
+        # mlp_coeffs = jnp.zeros((10, 20, 6))
+        # mlp_coeffs = mlp_coeffs.at[:, :, 0].set(1.0)
+
+        diff_dynamics_model, static_dynamics_model = eqx.partition(
+            dynamics_model, filter_spec
+        )
+        recon_loss, recon_grads = recon_loss_value_and_grad(
+            diff_dynamics_model, static_dynamics_model, mlp_coeffs, C_batch, latents
+        )
+
+        updated_model, opt_state, delta_model = update_dynamics_model(
+            dynamics_model,
+            recon_grads,
+            optimizer,
+            opt_state,
+        )
+
+        delta_str = f"Recon. Loss: {recon_loss:.4f}"
+        delta_str += eqx_module_to_string(delta_model)
+        progress_bar.set_postfix_str(delta_str)
+
+        dynamics_model = updated_model
+
+    return dynamics_model
+
+
+@eqx.filter_jit
+def update_dynamics_model(
+    dynamics_model: HierarchicalDecomposedDynamics,
+    grads: HierarchicalDecomposedDynamics,
+    optimizer: optax.GradientTransformation,
+    opt_state,
+):
+
+    grad_updates, opt_state = optimizer.update(grads, opt_state)
+    updated_model = eqx.apply_updates(dynamics_model, grad_updates)
+
+    delta_params = jax.tree.map(
+        lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
+        eqx.filter(updated_model, eqx.is_inexact_array),
+        eqx.filter(dynamics_model, eqx.is_inexact_array),
+    )
+
+    return updated_model, opt_state, delta_params
+
+
+def fine_tune_hierarchical():
+    pass
+
+
+@eqx.filter_jit
+def infer_mlp_coeffs(
+    model: HierarchicalDecomposedDynamics,
+    X: Array,
+    C: Array,
+    hyperparams: InferenceHyperparams,
+):
+    solver = ProximalGradient(
+        functools.partial(recon_loss, model=model),
+        hyperparams.prox,
+        maxiter=hyperparams.max_iter,
+        tol=hyperparams.tol,
+    )
+    return vmap(_infer_mlp_coeffs_one, (None, None, 0, 0, None))(
+        model, solver, X, C, hyperparams
+    )
+
+
+@eqx.filter_jit
+def _infer_mlp_coeffs_one(
+    model: HierarchicalDecomposedDynamics,
+    solver: ProximalGradient,
+    x_t: Array,
+    target_c_t: Array,
+    hyperparams: InferenceHyperparams,
+):
+    coeffs, _ = solver.run(
+        jnp.zeros(model.num_operators),
+        hyperparams_prox=hyperparams.l1_coeff,
+        target_c_t=target_c_t,
+        x_t=x_t,
+    )
+    coeffs = jnp.where(jnp.any(jnp.isnan(coeffs)), jnp.zeros_like(coeffs), coeffs)
+    return coeffs
+
+
+@eqx.filter_jit
+def recon_loss(
+    c_t: Array, model: HierarchicalDecomposedDynamics, target_c_t: Array, x_t: Array
+):
+    predicted_cs = model._compute_coeff_predictions(model.G, x_t)
+    predicted_cs = linear_combination(c_t, predicted_cs)
+    return l2_loss(predicted_cs, target_c_t).sum()
+
+
+@eqx.filter_jit
+def recon_loss_diff(
+    diff_model: HierarchicalDecomposedDynamics,
+    static_model: HierarchicalDecomposedDynamics,
+    coeffs: Array,
+    targets: Array,
+    latents: Array,
+    loss_weights: Array,
+):
+    model = eqx.combine(diff_model, static_model)
+    predicted_cs = model._compute_coeff_predictions_batched(model.G, latents)
+    predicted_cs = linear_combination(coeffs, predicted_cs)
+
+    return (loss_weights * l2_loss(predicted_cs, targets).sum(axis=-1)).sum()
+
+
+@eqx.filter_jit
+def recon_loss_diff_batched(
+    diff_model: HierarchicalDecomposedDynamics,
+    static_model: HierarchicalDecomposedDynamics,
+    coeffs: Array,
+    targets: Array,
+    latents: Array,
+):
+    loss = vmap(recon_loss_diff, in_axes=(None, None, 0, 0, 0, 0))
+    weights = jnp.linalg.norm(jnp.diff(latents, axis=1), axis=-1) ** 2
+    weights = jnp.hstack((weights, jnp.expand_dims(weights[:, -1], axis=1)))
+    weights = weights / weights.sum()
+    weights = jnp.ones_like(weights)
+    recon_loss = loss(
+        diff_model,
+        static_model,
+        coeffs,
+        targets,
+        latents,
+        weights,
+    )
+
+    return recon_loss.mean()
+
+
+recon_loss_value_and_grad = eqx.filter_jit(
+    eqx.filter_value_and_grad(recon_loss_diff_batched)
+)

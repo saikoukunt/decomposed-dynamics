@@ -1,22 +1,25 @@
+from typing import Callable
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, jit
+from jax import Array
 
 
 def extract_snippets(
-    trial_data: dict, num_snippets: int, samples_per_snippet: int, seed: int
+    trial_data: dict, num_snippets: int, timepoints_per_snippet: int, seed: int
 ) -> tuple[Array, Array]:
     keys = list(trial_data.keys())
 
     num_trials = len(trial_data)
-    num_observations = trial_data[keys[0]].shape[1]
-    trial_length = min(trial_data[key].shape[0] for key in trial_data)
+    observation_dim = trial_data[keys[0]].shape[1]
+    min_trial_length = min(trial_data[key].shape[0] for key in trial_data)
 
     rng = np.random.default_rng(seed)
 
-    snippet_length = min(samples_per_snippet, trial_length)
-    snippets = np.zeros((num_snippets, snippet_length, num_observations))
+    snippet_length = min(timepoints_per_snippet, min_trial_length)
+    snippets = np.zeros((num_snippets, snippet_length, observation_dim))
     snippet_times = np.zeros((num_snippets, 2), dtype=np.int32)
 
     if num_snippets == num_trials:
@@ -25,36 +28,12 @@ def extract_snippets(
         trial_inds = rng.choice(num_trials, num_snippets)
 
     for i, trial_ind in enumerate(trial_inds):
-        t_start = rng.choice(trial_length - snippet_length + 1)
+        t_start = rng.choice(min_trial_length - snippet_length + 1)
         t_end = t_start + snippet_length
         snippets[i] = trial_data[keys[trial_ind]][t_start:t_end, :]
         snippet_times[i] = [t_start, t_end]
 
     return jnp.array(snippets), jnp.array(snippet_times)
-
-
-@jit
-def reweighted_l1_prox(x: Array, l1_coeff: Array, reweight_coeff: Array) -> Array:
-    reweighted_coeffs = _reweight_l1(x, l1_coeff, reweight_coeff)
-    x = jnp.sign(x) * jnp.maximum(jnp.abs(x) - reweighted_coeffs, 0)
-
-    return x
-
-
-@jit
-def _reweight_l1(x: Array, l1_coeff: Array, reweight_coeff: float = 200) -> Array:
-    return l1_coeff / (1 + reweight_coeff * jnp.abs(x))
-
-
-@jit
-def spectral_normalize(F: Array):
-    return F / jnp.linalg.matrix_norm(F, keepdims=True, ord=2)
-
-
-@jit
-def operator_correlation(F: Array) -> Array:
-    pairwise_corrs = jnp.einsum("kij, lij -> kl", F, F)
-    return jnp.sum(jnp.triu(pairwise_corrs**2, k=1))
 
 
 def repackage_C_hat(C_hat, trial_ids):
@@ -102,3 +81,18 @@ def eqx_module_to_string(module):
         str += f", Avg \U0001d6ab{jax.tree_util.keystr(path)[1:]}: {val:.5f}"
 
     return str
+
+
+def make_filter_spec(model, frozen: Callable | None = None):
+    filter_spec = jax.tree.map(lambda _: True, model)
+    if frozen is None:
+        return filter_spec
+    return eqx.tree_at(frozen, filter_spec, replace_fn=lambda _: False)
+
+
+def keep_frozen(updated_model, model, filter_spec):
+    """Undo changes (e.g. from prox steps) to the frozen parts of `model`."""
+    return eqx.combine(
+        eqx.filter(updated_model, filter_spec),
+        eqx.filter(model, filter_spec, inverse=True),
+    )

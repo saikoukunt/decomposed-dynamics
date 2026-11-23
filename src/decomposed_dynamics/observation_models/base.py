@@ -6,9 +6,15 @@ from jax import Array
 
 
 class RateModel(eqx.Module):
-    def __init__(self, num_observations, num_latents):
+    num_observations: int
+    num_latents: int
+
+    def __init__(
+        self, num_observations: int, num_latents: int, key: Array, **init_kwargs
+    ):
         self.num_observations = num_observations
         self.num_latents = num_latents
+        self.initialize_params(key, **init_kwargs)
 
     @abstractmethod
     def initialize_params(self, key: Array, **kwargs):
@@ -31,17 +37,11 @@ class ObservationModel(eqx.Module):
     rate_model: RateModel
     noise_model: NoiseModel
 
-    def __init__(
-        self, rate_model: RateModel, noise_model: NoiseModel, key: Array, **init_kwargs
-    ):
+    def __init__(self, rate_model: RateModel, noise_model: NoiseModel):
         self.num_observations = rate_model.num_observations
         self.num_latents = rate_model.num_latents
         self.rate_model = rate_model
         self.noise_model = noise_model
-        self.initialize_params(key, **init_kwargs)
-
-    def initialize_params(self, key: Array, **kwargs) -> Self:
-        self.rate_model.initialize_params()
 
     def predict_rates(self, x: Array) -> Array:
         return self.rate_model.predict_rates(x)

@@ -10,20 +10,10 @@ from decomposed_dynamics.observation_models.rate_models import (
 
 
 def LinearGaussianObservations(num_observations, num_latents, key):
-    rate_model = LinearRateModel(num_observations, num_latents)
-    noise_model = GaussianNoiseModel()
-
-    observation_model = ObservationModel(rate_model, noise_model)
-    params = observation_model.initialize_params(key)
-
-    return observation_model, params
+    rate_model = LinearRateModel(num_observations, num_latents, key)
+    return ObservationModel(rate_model, GaussianNoiseModel())
 
 
 def SoftplusPoissonObservations(num_observations, num_latents, key):
-    rate_model = SoftplusLinearRateModel(num_observations, num_latents)
-    noise_model = PoissonNoiseModel()
-
-    observation_model = ObservationModel(rate_model, noise_model)
-    params = observation_model.initialize_params(key)
-
-    return observation_model, params
+    rate_model = SoftplusLinearRateModel(num_observations, num_latents, key)
+    return ObservationModel(rate_model, PoissonNoiseModel())

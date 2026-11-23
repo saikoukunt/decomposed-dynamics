@@ -1,3 +1,5 @@
+from typing import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -10,126 +12,148 @@ from decomposed_dynamics.dynamics_models import (
     OperatorHyperparams,
 )
 from decomposed_dynamics.inference import (
+    InferenceBackend,
     InferenceHyperparams,
-    NoObsInferenceHyperparams,
-    bpdn_inference,
-    bpdn_inference_no_obs,
+    NoObsInferenceBackend,
+    interpolate_penalties,
 )
 from decomposed_dynamics.observation_models import ObservationModel
-from decomposed_dynamics.utils import eqx_module_to_string, extract_snippets
+from decomposed_dynamics.utils import (
+    eqx_module_to_string,
+    extract_snippets,
+    keep_frozen,
+    make_filter_spec,
+)
 
 
 def fit(
     data: dict,
-    observation_model: ObservationModel,
     dynamics_model: DecomposedDynamicsModel,
     samples_per_snippet: int,
     num_snippets: int,
+    observation_model: ObservationModel | None = None,
     lr_init: float = 10.0,
-    lr_decay: float = 0.9995,
+    lr_end: None | float = None,
     max_iter: int = 200,
-    operator_update_hyperparams: dict | OperatorHyperparams = {},
-    inference_hyperparams: dict | InferenceHyperparams = {},
-) -> tuple[ObservationModel, DecomposedDynamicsModel]:
-    if type(operator_update_hyperparams) is dict:
-        operator_update_hyperparams = dynamics_model.initialize_hyperparams(
-            **operator_update_hyperparams
+    inference_backend: type[InferenceBackend | NoObsInferenceBackend] | None = None,
+    inference_hyperparams: InferenceHyperparams = None,
+    model_update_hyperparams: OperatorHyperparams | None = None,
+    frozen: Callable | None = None,
+    inference_hyperparams_end: InferenceHyperparams | None = None,
+) -> tuple[ObservationModel | None, DecomposedDynamicsModel]:
+    """Fit `dynamics_model`, jointly with `observation_model` when one is given.
+
+    `frozen(dynamics_model, observation_model)` selects the parts to keep fixed.
+    """
+
+    inference_backend, inference_hyperparams, model_update_hyperparams = (
+        initialize_fit_hyperparams(
+            dynamics_model,
+            observation_model,
+            inference_backend,
+            inference_hyperparams,
+            model_update_hyperparams,
         )
+    )
 
-    if type(inference_hyperparams) is dict:
-        inference_hyperparams = InferenceHyperparams(**inference_hyperparams)
+    dynamics_filter_spec, observation_filter_spec = make_filter_spec(
+        (dynamics_model, observation_model),
+        None if frozen is None else lambda models: frozen(*models),
+    )
 
-    lr = lr_init
+    # TODO: move hyperparams scheduling to class
+    if lr_end is None:
+        lr_end = lr_init
+    lr = jnp.linspace(lr_init, lr_end, max_iter)
+
+    inference_hyperparams_start = inference_hyperparams
+    if inference_hyperparams_end is None:
+        inference_hyperparams_end = inference_hyperparams_start
+
     progress_bar = trange(max_iter)
 
     for i in progress_bar:
-        observations, _ = extract_snippets(
-            data, num_snippets, samples_per_snippet, seed=i
+        snippets, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
+
+        # TODO: handle in scheduling class
+        inference_hyperparams = interpolate_penalties(
+            inference_hyperparams_start,
+            inference_hyperparams_end,
+            min(2 * i / max_iter, 1),
         )
 
-        latents, operator_coeffs = bpdn_inference(
-            observation_model,
-            dynamics_model,
-            observations,
-            inference_hyperparams,
-        )
+        if observation_model is None:
+            latents = snippets
+            operator_coeffs = inference_backend.infer_batch(
+                dynamics_model,
+                latents[:, :-1, :],
+                latents[:, 1:, :],
+                inference_hyperparams,
+            )
+        else:
+            latents, operator_coeffs = inference_backend.infer_batch(
+                observation_model,
+                dynamics_model,
+                snippets,
+                inference_hyperparams,
+            )
 
-        data_nll, data_nll_grads = data_nll_value_and_grad(
-            observation_model, observations, latents
+        diff_dynamics_model, static_dynamics_model = eqx.partition(
+            dynamics_model, dynamics_filter_spec
         )
         dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
-            dynamics_model, latents, operator_coeffs
+            diff_dynamics_model, static_dynamics_model, latents, operator_coeffs
         )
-
-        updated_obs_model, delta_obs_model = update_observation_model(
-            observation_model, data_nll_grads, lr
-        )
-        updated_dynamics_model, delta_dynamics_model = update_dynamics_model(
+        dynamics_model, delta_dynamics_model = update_dynamics_model(
             dynamics_model,
             dynamics_recon_grads,
-            lr,
-            operator_update_hyperparams,
+            lr[i],
+            model_update_hyperparams,
+            latents,
+            dynamics_filter_spec,
         )
 
-        delta_str = f"Data NLL: {data_nll:.4f}, Recon. Loss: {dynamics_recon_loss:.4f}"
-        delta_str += eqx_module_to_string(delta_obs_model)
+        # TODO: move loss reporting to custom function
+        delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
+
+        if observation_model is not None:
+            diff_obs_model, static_obs_model = eqx.partition(
+                observation_model, observation_filter_spec
+            )
+            data_nll, data_nll_grads = data_nll_value_and_grad(
+                diff_obs_model, static_obs_model, snippets, latents
+            )
+            observation_model, delta_obs_model = update_observation_model(
+                observation_model, data_nll_grads, lr[i], observation_filter_spec
+            )
+            delta_str = f"Data NLL: {data_nll:.4f}, " + delta_str
+            delta_str += eqx_module_to_string(delta_obs_model)
+
         delta_str += eqx_module_to_string(delta_dynamics_model)
         progress_bar.set_postfix_str(delta_str)
-
-        observation_model = updated_obs_model
-        dynamics_model = updated_dynamics_model
-        lr *= lr_decay
 
     return observation_model, dynamics_model
 
 
-def fit_no_obs(
-    data: dict,
+def initialize_fit_hyperparams(
     dynamics_model: DecomposedDynamicsModel,
-    samples_per_snippet: int,
-    num_snippets: int,
-    lr_init: float = 10.0,
-    lr_decay: float = 0.9995,
-    max_iter: int = 200,
-    model_update_hyperparams: dict | OperatorHyperparams = {},
-    inference_hyperparams: dict | NoObsInferenceHyperparams = {},
-) -> DecomposedDynamicsModel:
-    if type(model_update_hyperparams) is dict:
-        model_update_hyperparams = dynamics_model.initialize_hyperparams(
-            **model_update_hyperparams
-        )
+    observation_model: ObservationModel | None = None,
+    inference_backend: type[InferenceBackend | NoObsInferenceBackend] | None = None,
+    inference_hyperparams: InferenceHyperparams = None,
+    model_update_hyperparams: OperatorHyperparams | None = None,
+):
+    if inference_backend is None and inference_hyperparams is None:
+        raise ValueError("pass an inference backend, inference hyperparams, or both")
 
-    if type(inference_hyperparams) is dict:
-        inference_hyperparams = NoObsInferenceHyperparams(**inference_hyperparams)
+    if inference_backend is None:
+        inference_backend = inference_hyperparams.get_backend(observation_model)
+    elif inference_hyperparams is None:
+        inference_hyperparams = inference_backend.initialize_hyperparams()
 
-    lr = lr_init
-    progress_bar = trange(max_iter)
+    if model_update_hyperparams is None:
+        model_update_hyperparams = dynamics_model.initialize_hyperparams()
 
-    for i in progress_bar:
-        latents, _ = extract_snippets(data, num_snippets, samples_per_snippet, seed=i)
-
-        operator_coeffs = bpdn_inference_no_obs(
-            dynamics_model, latents, inference_hyperparams
-        )
-
-        dynamics_recon_loss, dynamics_recon_grads = dynamics_recon_value_and_grad(
-            dynamics_model, latents, operator_coeffs
-        )
-        updated_model, delta_model = update_dynamics_model(
-            dynamics_model,
-            dynamics_recon_grads,
-            lr,
-            model_update_hyperparams,
-        )
-
-        delta_str = f"Recon. Loss: {dynamics_recon_loss:.4f}"
-        delta_str += eqx_module_to_string(delta_model)
-        progress_bar.set_postfix_str(delta_str)
-
-        dynamics_model = updated_model
-        lr *= lr_decay
-
-    return dynamics_model
+    return inference_backend, inference_hyperparams, model_update_hyperparams
 
 
 @eqx.filter_jit
@@ -137,10 +161,11 @@ def update_observation_model(
     obs_model: ObservationModel,
     grads,
     lr,
+    filter_spec: ObservationModel,
 ):
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(obs_model, grad_updates)
-    updated_model = updated_model.apply_prox()
+    updated_model = keep_frozen(updated_model.apply_prox(), obs_model, filter_spec)
 
     delta_params = jax.tree.map(
         lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
@@ -157,11 +182,17 @@ def update_dynamics_model(
     grads,
     lr,
     hyperparams: OperatorHyperparams,
+    latents: Array,
+    filter_spec: DecomposedDynamicsModel,
 ):
 
     grad_updates = jax.tree.map(lambda grad: -lr * grad, grads)
     updated_model = eqx.apply_updates(dynamics_model, grad_updates)
-    updated_model = updated_model.regularize_operators(hyperparams)
+    updated_model = keep_frozen(
+        updated_model.regularize_operators(hyperparams, latents),
+        dynamics_model,
+        filter_spec,
+    )
 
     delta_params = jax.tree.map(
         lambda new, old: ((new - old) ** 2).sum() / (old**2).sum(),
@@ -173,32 +204,34 @@ def update_dynamics_model(
 
 @eqx.filter_jit
 def compute_dynamics_recon_loss(
-    dynamics_model: DecomposedDynamicsModel,
-    latents: Array,
+    diff_dynamics_model: DecomposedDynamicsModel,
+    static_dynamics_model: DecomposedDynamicsModel,
+    states: Array,
     operator_coeffs: Array,
 ):
+    dynamics_model = eqx.combine(diff_dynamics_model, static_dynamics_model)
     return vmap(compute_dynamics_recon_loss_sequence, in_axes=(None, 0, 0))(
-        dynamics_model, latents, operator_coeffs
+        dynamics_model, states, operator_coeffs
     ).mean()
 
 
 @eqx.filter_jit
 def compute_dynamics_recon_loss_sequence(
     dynamics_model: DecomposedDynamicsModel,
-    latents: Array,
+    states: Array,
     operator_coeffs: Array,
 ):
-    flows = dynamics_model.compute_operator_flows(latents[:-1, :])
-    predictions = dynamics_model.predict_next_state(
-        latents[:-1, :], operator_coeffs, flows
+    flows = dynamics_model.compute_operator_predictions(states[:-1, :])
+    predictions = dynamics_model.combine_operator_predictions(
+        states[:-1, :], operator_coeffs, flows
     )
-    mse = l2_loss(predictions, latents[1:, :]).sum(axis=-1).mean()
+    null_predictions = dynamics_model.combine_operator_predictions(
+        states[:-1, :], jnp.zeros_like(operator_coeffs), flows
+    )
+    mse = l2_loss(predictions, states[1:, :]).sum(axis=-1).mean()
 
-    null_predictions = dynamics_model.predict_next_state(
-        latents[:-1, :], jnp.zeros_like(operator_coeffs), flows
-    )
     variance = jnp.maximum(
-        l2_loss(null_predictions, latents[1:, :]).sum(axis=-1).mean(), 1e-3
+        l2_loss(null_predictions, states[1:, :]).sum(axis=-1).mean(), 1e-4
     )
 
     return mse / variance
@@ -211,10 +244,12 @@ dynamics_recon_value_and_grad = eqx.filter_jit(
 
 @eqx.filter_jit
 def compute_data_nll(
-    obs_model: ObservationModel,
+    diff_obs_model: ObservationModel,
+    static_obs_model: ObservationModel,
     observations: Array,
     latents: Array,
 ):
+    obs_model = eqx.combine(diff_obs_model, static_obs_model)
     rates = obs_model.predict_rates(latents)
     return obs_model.neg_log_likelihood(rates, observations)
 

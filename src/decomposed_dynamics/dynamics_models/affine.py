@@ -12,7 +12,7 @@ from decomposed_dynamics.dynamics_models.base import (
     DeltaDynamics,
 )
 from decomposed_dynamics.dynamics_models.linear import LinearOperatorHyperparams
-from decomposed_dynamics.utils import (
+from decomposed_dynamics.dynamics_models.regularization import (
     operator_correlation,
     reweighted_l1_prox,
     spectral_normalize,
@@ -31,22 +31,23 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
     def initialize_params(self, key: Array):
         key, subkey = jr.split(key)
 
-        F = jr.normal(key, (self.num_operators, self.num_latents, self.num_latents))
+        F = jr.normal(key, (self.num_operators, self.state_dim, self.state_dim))
         self.F = spectral_normalize(F)
-
-        self.b = jr.normal(subkey, (self.num_operators, self.num_latents))
+        self.b = jr.normal(subkey, (self.num_operators, self.state_dim))
 
     @staticmethod
     def initialize_hyperparams(**kwargs) -> AffineOperatorHyperparams:
         return AffineOperatorHyperparams(**kwargs)
 
     @eqx.filter_jit
-    def compute_operator_flows(self, x: Array) -> Array:
+    def compute_operator_predictions(self, x: Array) -> Array:
         offsets = x[..., None, :] - self.b
         return jnp.einsum("kij, ...kj -> ...ki", self.F, offsets) + self.b
 
     @eqx.filter_jit
-    def regularize_operators(self, hyperparams: AffineOperatorHyperparams) -> Self:
+    def regularize_operators(
+        self, hyperparams: AffineOperatorHyperparams, latents: Array
+    ) -> Self:
         F, b = self.apply_prox(
             self.F,
             self.b,
@@ -84,8 +85,6 @@ class DecomposedAffineDynamics(DecomposedDynamicsModel):
 
 
 class DecomposedAffineDeltaDynamics(DeltaDynamics, DecomposedAffineDynamics):
-    def __init__(
-        self, num_operators: int, num_latents: int, key: Array, dt: float, **init_kwargs
-    ):
-        super().__init__(dt)
-        super(DecomposedAffineDynamics, self).__init__(num_operators, num_latents, key)
+    @eqx.filter_jit
+    def compute_operator_predictions(self, x: Array) -> Array:
+        return jnp.einsum("kij, ...kj -> ...ki", self.F, x[..., None, :] - self.b)

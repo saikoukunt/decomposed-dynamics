@@ -3,7 +3,11 @@ from typing import Self
 
 import equinox as eqx
 import jax.numpy as jnp
-from jax import Array, jit
+from jax import Array
+
+
+def linear_combination(c: Array, preds: Array) -> Array:
+    return jnp.einsum("...k, ...ki -> ...i", c, preds)
 
 
 class OperatorHyperparams(ABC):
@@ -12,11 +16,11 @@ class OperatorHyperparams(ABC):
 
 class DecomposedDynamicsModel(eqx.Module):
     num_operators: int
-    num_latents: int
+    state_dim: int
 
-    def __init__(self, num_operators: int, num_latents: int, key: Array, **init_kwargs):
+    def __init__(self, num_operators: int, state_dim: int, key: Array, **init_kwargs):
         self.num_operators = num_operators
-        self.num_latents = num_latents
+        self.state_dim = state_dim
         self.initialize_params(key, **init_kwargs)
 
     @abstractmethod
@@ -29,24 +33,39 @@ class DecomposedDynamicsModel(eqx.Module):
         raise NotImplementedError
 
     @abstractmethod
-    def compute_operator_flows(self, x: Array) -> Array:
+    def compute_operator_predictions(self, x: Array) -> Array:
         raise NotImplementedError
 
     @abstractmethod
-    def regularize_operators(self, **kwargs) -> Self:
+    def regularize_operators(
+        self, latents: Array, hyperparams: OperatorHyperparams, **kwargs
+    ) -> Self:
         raise NotImplementedError
 
-    @jit
-    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
-        return jnp.einsum("...k, ...ki -> ...i", c, flows)
+    @eqx.filter_jit
+    def combine_operator_predictions(
+        self, x: Array, c: Array, per_operator_predictions: Array
+    ) -> Array:
+        return linear_combination(c, per_operator_predictions)
+
+    def compute_operator_flows(self, x: Array) -> Array:
+        return self.compute_operator_predictions(x) - x[..., None, :]
 
 
-class DeltaDynamics(eqx.Module):
-    dt: float
+class DeltaDynamics(DecomposedDynamicsModel):
+    """Operators predict velocities, stepped forward with an Euler step of size `dt`."""
 
-    def __init__(self, dt):
+    dt: float = eqx.field(static=True)
+
+    def __init__(self, *args, dt: float, **kwargs):
         self.dt = dt
+        super().__init__(*args, **kwargs)
 
-    @jit
-    def predict_next_state(self, x: Array, c: Array, flows: Array) -> Array:
-        return x + self.dt * jnp.einsum("...k, ...ki -> ...i", c, flows)
+    @eqx.filter_jit
+    def combine_operator_predictions(
+        self, x: Array, c: Array, per_operator_predictions: Array
+    ) -> Array:
+        return x + self.dt * linear_combination(c, per_operator_predictions)
+
+    def compute_operator_flows(self, x: Array) -> Array:
+        return self.compute_operator_predictions(x)

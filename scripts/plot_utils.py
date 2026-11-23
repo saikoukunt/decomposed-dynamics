@@ -20,6 +20,7 @@ def plot_Fs(F, vmin=None, vmax=None):
         plt.imshow(F[i], aspect="equal", vmin=vmin, vmax=vmax)
         plt.axis("off")
 
+    plt.suptitle("Learned fs")
     plt.tight_layout()
 
 

@@ -27,8 +27,13 @@ members = ["simulations"]
 
 [dependency-groups]
 dev = [
+    "click>=8.5.0",
     "matplotlib>=3.10.9",
     "simulations",
     "tornado>=6.5.7",
 ]
 
+
+[tool.ruff.lint]
+# keep unused imports on auto-fix; still reported as F401
+unfixable = ["F401"]

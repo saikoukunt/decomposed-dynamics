@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import numpy.typing as npt
@@ -42,7 +41,7 @@ def simulate_two_subsystems_no_obs(
     X = {i: X[i] for i in range(num_trials)}
     C = {i: C[i] for i in range(num_trials)}
 
-    return X, C, jnp.array(F)
+    return X, C, F
 
 
 def _simulate_no_obs_state(
